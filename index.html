@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Smart Car">
+  <title>Smart Car</title>
+  <style>
+    :root {
+      --bg:     #1c1c1e;
+      --bg2:    #2c2c2e;
+      --bg3:    #3a3a3c;
+      --accent: #0a84ff;
+      --green:  #30d158;
+      --red:    #ff453a;
+      --yellow: #ffd60a;
+      --text:   #ffffff;
+      --text2:  rgba(235,235,245,0.6);
+      --r:      12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100svh;
+    }
+
+    /* ---- 共通 ---- */
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+    .sub { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
+
+    .card { background: var(--bg2); border-radius: var(--r); padding: 16px; margin-bottom: 12px; }
+    .card-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
+
+    input[type="number"], input[type="text"] {
+      width: 100%; background: var(--bg3); border: 1.5px solid transparent;
+      border-radius: 10px; padding: 14px; color: var(--text);
+      font-size: 17px; outline: none; -webkit-appearance: none;
+      transition: border-color .15s;
+    }
+    input:focus { border-color: var(--accent); }
+
+    .btn {
+      width: 100%; border: none; border-radius: var(--r);
+      padding: 17px; font-size: 17px; font-weight: 600;
+      cursor: pointer; -webkit-appearance: none; transition: opacity .15s;
+    }
+    .btn:disabled { opacity: 0.4; }
+    .btn-blue  { background: var(--accent); color: #fff; }
+    .btn-red   { background: var(--red);    color: #fff; }
+    .btn-gray  { background: var(--bg2);    color: var(--accent); }
+
+    /* ---- ローディング ---- */
+    #screen-loading {
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 16px; min-height: 100svh;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--bg3); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- セットアップ ---- */
+    #screen-setup.active { display: flex; align-items: center; justify-content: center; min-height: 100svh; }
+    #screen-setup .inner { padding: 24px; max-width: 440px; width: 100%; }
+    #screen-setup h1 { margin-bottom: 6px; }
+
+    /* ---- ステータスバー ---- */
+    .status-bar {
+      background: var(--bg2); padding: 14px 20px;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid var(--bg3);
+      position: sticky; top: 0; z-index: 10;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .dot-green  { background: var(--green); }
+    .dot-yellow { background: var(--yellow); }
+    .status-label { font-size: 14px; font-weight: 500; }
+
+    /* ---- スマホ最適化：乗車・降車画面 ---- */
+    #screen-start.active, #screen-end.active {
+      display: flex; flex-direction: column; height: 100svh;
+    }
+    #screen-start .content, #screen-end .content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+    .btn-area { padding: 12px 20px 36px; flex-shrink: 0; background: var(--bg); }
+    .card-expand { flex: 1; display: flex; flex-direction: column; }
+
+    /* ---- コンテンツ ---- */
+    .content { padding: 20px 20px 0; }
+
+    /* ---- 目的ボタン ---- */
+    .purpose-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .purpose-btn {
+      background: var(--bg3); border: 2px solid transparent;
+      border-radius: 10px; padding: 14px 8px;
+      color: var(--text); font-size: 15px; font-weight: 500;
+      cursor: pointer; text-align: center;
+      transition: all .15s; -webkit-appearance: none;
+    }
+    .purpose-btn.selected { background: rgba(10,132,255,.18); border-color: var(--accent); color: var(--accent); }
+    .purpose-btn.full { grid-column: 1 / -1; }
+    #other-input { margin-top: 10px; }
+
+    /* ---- 写真 ---- */
+    .photo-tap {
+      background: var(--bg3); border-radius: 10px; min-height: 130px; flex: 1;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 8px; cursor: pointer;
+      color: var(--text2); font-size: 13px;
+    }
+    .photo-tap:active { opacity: .7; }
+    .photo-icon { font-size: 32px; }
+    #photo-preview-start, #photo-preview-end {
+      width: 100%; border-radius: 10px; max-height: 200px;
+      object-fit: cover; display: none; margin-top: 10px;
+    }
+    input[type="file"] { display: none; }
+
+    /* ---- 乗車情報 ---- */
+    .info-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 7px 0; border-bottom: 1px solid var(--bg3); font-size: 14px;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .info-key { color: var(--text2); }
+    .info-val { font-weight: 500; text-align: right; max-width: 65%; font-size: 13px; }
+
+    /* ---- 結果 ---- */
+    #screen-result {
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 18px; min-height: 100svh;
+      padding: 40px; text-align: center;
+    }
+    #screen-result.active { display: flex; }
+    .result-icon { font-size: 68px; }
+    .result-title { font-size: 22px; font-weight: 700; }
+    .result-dist  { font-size: 52px; font-weight: 700; color: var(--green); }
+    .result-sub   { color: var(--text2); font-size: 15px; }
+
+    /* ---- トースト ---- */
+    .toast {
+      position: fixed; bottom: 36px; left: 50%;
+      transform: translateX(-50%); background: rgba(0,0,0,.85);
+      color: #fff; padding: 11px 22px; border-radius: 20px;
+      font-size: 14px; opacity: 0; transition: opacity .3s;
+      pointer-events: none; white-space: nowrap; z-index: 100;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<!-- ローディング -->
+<div id="screen-loading">
+  <div class="spinner"></div>
+  <div style="color:var(--text2);font-size:14px;">接続中...</div>
+</div>
+
+<!-- セットアップ -->
+<div id="screen-setup" class="screen">
+  <div class="inner">
+    <h1>初回設定</h1>
+    <p class="sub" style="margin-bottom:32px;">認証トークンを入力してください<br>（設定シート B6 の値）</p>
+    <div class="card">
+      <div class="card-label">認証トークン</div>
+      <input type="text" id="input-token" placeholder="32文字のトークン" autocomplete="off" />
+    </div>
+    <button class="btn btn-blue" onclick="saveSetup()" style="margin-top:8px;">保存して開始</button>
+  </div>
+</div>
+
+<!-- 乗車画面 -->
+<div id="screen-start" class="screen">
+  <div class="status-bar">
+    <div class="dot dot-green"></div>
+    <div class="status-label">乗車前</div>
+  </div>
+  <div class="content">
+    <h1>🚗 乗車記録</h1>
+    <p class="sub">出発時のメーター値を記録します</p>
+
+    <div class="card">
+      <div class="card-label">業務目的</div>
+      <div class="purpose-grid">
+        <button class="purpose-btn" onclick="selectPurpose(this,'現場移動')">現場移動</button>
+        <button class="purpose-btn" onclick="selectPurpose(this,'前日乗り込み')">前日乗り込み</button>
+        <button class="purpose-btn full" onclick="selectPurpose(this,'__other__')">その他</button>
+      </div>
+      <input type="text" id="other-input" placeholder="目的を入力" style="display:none;" />
+    </div>
+
+    <div class="card card-expand">
+      <div class="card-label">メーター写真</div>
+      <div class="photo-tap" onclick="document.getElementById('cam-start').click()">
+        <span class="photo-icon">📷</span>
+        <span>タップして撮影</span>
+      </div>
+      <img id="photo-preview-start" />
+      <input type="file" id="cam-start" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-start')">
+    </div>
+
+    <div class="card">
+      <div class="card-label">メーター値 (km)</div>
+      <input type="number" id="odo-start" placeholder="例: 12345" inputmode="numeric" />
+    </div>
+
+  </div>
+  <div class="btn-area">
+    <button class="btn btn-blue" onclick="submitStart()">乗車記録</button>
+  </div>
+</div>
+
+<!-- 降車画面 -->
+<div id="screen-end" class="screen">
+  <div class="status-bar">
+    <div class="dot dot-yellow"></div>
+    <div class="status-label">走行中</div>
+  </div>
+  <div class="content">
+    <h1>🏁 降車記録</h1>
+    <p class="sub">到着時のメーター値を記録します</p>
+
+    <div class="card">
+      <div class="card-label">乗車情報</div>
+      <div id="trip-info"></div>
+    </div>
+
+    <div class="card card-expand">
+      <div class="card-label">メーター写真</div>
+      <div class="photo-tap" onclick="document.getElementById('cam-end').click()">
+        <span class="photo-icon">📷</span>
+        <span>タップして撮影</span>
+      </div>
+      <img id="photo-preview-end" />
+      <input type="file" id="cam-end" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-end')">
+    </div>
+
+    <div class="card">
+      <div class="card-label">メーター値 (km)</div>
+      <input type="number" id="odo-end" placeholder="例: 12389" inputmode="numeric" />
+    </div>
+
+  </div>
+  <div class="btn-area">
+    <button class="btn btn-red" onclick="submitEnd()">降車記録</button>
+  </div>
+</div>
+
+<!-- 結果 -->
+<div id="screen-result">
+  <div class="result-icon">✅</div>
+  <div class="result-title" id="result-title"></div>
+  <div class="result-dist"  id="result-dist"></div>
+  <div class="result-sub"   id="result-sub"></div>
+  <button class="btn btn-gray" onclick="restart()" style="margin-top:12px; width:auto; padding:14px 40px;">完了</button>
+</div>
+
+<!-- トースト -->
+<div class="toast" id="toast"></div>
+
+<script>
+const GAS_URL   = 'https://script.google.com/macros/s/AKfycbzSPja787LxEq4DyC74h62l0Zyac-wi8ZVQEdJIUnF6qTwYUh_ohODj0CkxbulH-L9h/exec';
+const TOKEN_KEY = 'smartcar_token';
+
+let currentTrip  = null;
+let selectedPurpose = '';
+let photoBase64Start = '';
+let photoBase64End   = '';
+
+// ---- 画面切替 ----
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + id);
+  if (id === 'result') {
+    el.style.display = 'flex'; // flex レイアウト
+    el.classList.add('active');
+  } else if (el) {
+    el.classList.add('active');
+  }
+  document.getElementById('screen-loading').style.display = 'none';
+}
+
+// ---- トースト ----
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ---- トークン ----
+function getToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+
+// ---- 初期化 ----
+async function init() {
+  document.getElementById('screen-loading').style.display = 'flex';
+  if (!getToken()) { show('setup'); return; }
+  try {
+    const res  = await fetch(GAS_URL + '?action=status&token=' + getToken());
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    if (json.hasOpenTrip) {
+      currentTrip = json;
+      buildTripInfo();
+      show('end');
+    } else {
+      currentTrip = null;
+      resetStart();
+      show('start');
+    }
+  } catch(e) {
+    toast('接続エラー: ' + e.message);
+    show('setup');
+  }
+}
+
+function saveSetup() {
+  const token = document.getElementById('input-token').value.trim();
+  if (!token) { toast('トークンを入力してください'); return; }
+  localStorage.setItem(TOKEN_KEY, token);
+  init();
+}
+
+// ---- 乗車画面 ----
+function resetStart() {
+  selectedPurpose  = '';
+  photoBase64Start = '';
+  document.querySelectorAll('.purpose-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('other-input').style.display = 'none';
+  document.getElementById('other-input').value = '';
+  document.getElementById('odo-start').value = '';
+  const prev = document.getElementById('photo-preview-start');
+  prev.style.display = 'none'; prev.src = '';
+}
+
+function selectPurpose(btn, val) {
+  document.querySelectorAll('.purpose-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedPurpose = val;
+  const oi = document.getElementById('other-input');
+  if (val === '__other__') { oi.style.display = 'block'; oi.focus(); }
+  else { oi.style.display = 'none'; }
+}
+
+function handlePhoto(input, previewId) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    const b64 = dataUrl.split(',')[1];
+    if (previewId === 'photo-preview-start') photoBase64Start = b64;
+    else photoBase64End = b64;
+    const prev = document.getElementById(previewId);
+    prev.src = dataUrl; prev.style.display = 'block';
+    prev.previousElementSibling.style.display = 'none'; // hide photo-tap
+  };
+  reader.readAsDataURL(file);
+}
+
+async function getLocation() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) { resolve({ lat: '', lon: '' }); return; }
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      () => resolve({ lat: '', lon: '' }),
+      { timeout: 8000, maximumAge: 30000 }
+    );
+  });
+}
+
+async function getAddress(lat, lon) {
+  if (!lat || !lon) return '';
+  try {
+    const res = await fetch(
+      'https://nominatim.openstreetmap.org/reverse?lat=' + lat + '&lon=' + lon + '&format=json&accept-language=ja',
+      { headers: { 'Accept-Language': 'ja' } }
+    );
+    const json = await res.json();
+    // display_name は「番地, 丁目, 区, 都道府県, 国」の順なので日本式に組み直す
+    const a = json.address || {};
+    const parts = [
+      a.state,           // 都道府県
+      a.city || a.town || a.village || a.county,  // 市区町村
+      a.suburb || a.neighbourhood || a.quarter,    // 地区
+      a.road,            // 道路名 / 丁目
+      a.house_number     // 番地
+    ].filter(Boolean);
+    return parts.join('');
+  } catch(e) {
+    return '';
+  }
+}
+
+async function submitStart() {
+  const purpose = selectedPurpose === '__other__'
+    ? document.getElementById('other-input').value.trim()
+    : selectedPurpose;
+  const odometer = document.getElementById('odo-start').value.trim();
+  if (!purpose) { toast('業務目的を選択してください'); return; }
+  if (!odometer) { toast('メーター値を入力してください'); return; }
+
+  const btn = document.querySelector('#screen-start .btn');
+  btn.disabled = true; btn.textContent = '位置情報取得中...';
+
+  const loc = await getLocation();
+  btn.textContent = '住所取得中...';
+  const address = await getAddress(loc.lat, loc.lon);
+  btn.textContent = '送信中...';
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        token: getToken(), type: 'start',
+        datetime: new Date().toISOString(),
+        lat: loc.lat, lon: loc.lon, address: address,
+        odometer: Number(odometer),
+        purpose: purpose,
+        photo: photoBase64Start
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    showResult('乗車記録完了', '', '次回起動時に降車モードになります');
+  } catch(e) {
+    toast('エラー: ' + e.message);
+    btn.disabled = false; btn.textContent = '乗車記録';
+  }
+}
+
+// ---- 降車画面 ----
+function buildTripInfo() {
+  const t = currentTrip;
+  const startTime = t.startDatetime
+    ? new Date(t.startDatetime).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
+    : '不明';
+  const odo = (t.odometer != null) ? t.odometer : '-';
+  const addressRow = t.startAddress
+    ? '<div class="info-row"><span class="info-key">乗車地</span><span class="info-val">' + t.startAddress + '</span></div>'
+    : '';
+  document.getElementById('trip-info').innerHTML =
+    '<div class="info-row"><span class="info-key">乗車時刻</span><span class="info-val">' + startTime + '</span></div>' +
+    '<div class="info-row"><span class="info-key">乗車時メーター</span><span class="info-val">' + odo + ' km</span></div>' +
+    addressRow;
+}
+
+async function submitEnd() {
+  const odometer = document.getElementById('odo-end').value.trim();
+  if (!odometer) { toast('メーター値を入力してください'); return; }
+
+  const btn = document.querySelector('#screen-end .btn');
+  btn.disabled = true; btn.textContent = '位置情報取得中...';
+
+  const loc = await getLocation();
+  btn.textContent = '住所取得中...';
+  const address = await getAddress(loc.lat, loc.lon);
+  btn.textContent = '送信中...';
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        token: getToken(), type: 'end',
+        tripId: currentTrip.tripId,
+        datetime: new Date().toISOString(),
+        lat: loc.lat, lon: loc.lon, address: address,
+        odometer: Number(odometer),
+        photo: photoBase64End
+      })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    if (json.continuityAlert) toast(json.continuityAlert);
+    showResult('降車記録完了', json.distance + ' km', '走行距離');
+  } catch(e) {
+    toast('エラー: ' + e.message);
+    btn.disabled = false; btn.textContent = '降車記録';
+  }
+}
+
+// ---- 結果 ----
+function showResult(title, dist, sub) {
+  document.getElementById('result-title').textContent = title;
+  document.getElementById('result-dist').textContent  = dist;
+  document.getElementById('result-sub').textContent   = sub;
+  document.getElementById('screen-result').style.display = 'flex';
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+}
+
+function restart() {
+  document.getElementById('screen-result').style.display = 'none';
+  init();
+}
+
+// ---- 起動 ----
+init();
+</script>
+</body>
+</html>
