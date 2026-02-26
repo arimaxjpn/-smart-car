@@ -370,10 +370,41 @@ function handlePhoto(input, previewId) {
       const prev = document.getElementById(previewId);
       prev.src = dataUrl; prev.style.display = 'block';
       prev.previousElementSibling.style.display = 'none';
+      // OCR 自動読み取り
+      const odoId = previewId === 'photo-preview-start' ? 'odo-start' : 'odo-end';
+      runOcr(b64, odoId);
     };
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+async function runOcr(base64, odoInputId) {
+  const odoInput = document.getElementById(odoInputId);
+  const origPlaceholder = odoInput.placeholder;
+  odoInput.value = '';
+  odoInput.placeholder = '📷 読み取り中...';
+  odoInput.disabled = true;
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ token: getToken(), type: 'ocr', photo: base64 })
+    });
+    const json = await res.json();
+    if (json.success && json.odometer) {
+      odoInput.value = json.odometer;
+      toast('📷 ' + json.odometer.toLocaleString() + ' km を読み取りました');
+    } else {
+      toast('読み取り失敗 — 手動で入力してください');
+    }
+  } catch(e) {
+    toast('読み取り失敗 — 手動で入力してください');
+  } finally {
+    odoInput.placeholder = origPlaceholder;
+    odoInput.disabled = false;
+    odoInput.focus();
+  }
 }
 
 async function getLocation() {
