@@ -386,6 +386,8 @@ function resetStart() {
   document.getElementById('odo-start').value = '';
   const prev = document.getElementById('photo-preview-start');
   prev.style.display = 'none'; prev.src = '';
+  const btn = document.querySelector('#screen-start .btn');
+  btn.disabled = false; btn.textContent = '乗車記録';
 }
 
 function selectPurpose(btn, val) {
