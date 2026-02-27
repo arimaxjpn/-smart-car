@@ -399,10 +399,12 @@ async function runOcr(base64, odoInputId) {
       odoInput.value = json.odometer;
       toast('📷 ' + json.odometer.toLocaleString() + ' km を読み取りました');
     } else {
+      const detail = json.rawText || json.error || '応答なし';
+      odoInput.placeholder = '読取失敗: ' + detail.substring(0, 40);
       toast('読み取り失敗 — 手動で入力してください');
     }
   } catch(e) {
-    toast('読み取り失敗 — 手動で入力してください');
+    toast('読み取り失敗: ' + e.message);
   } finally {
     odoInput.placeholder = origPlaceholder;
     odoInput.disabled = false;
