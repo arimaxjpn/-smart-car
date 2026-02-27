@@ -398,15 +398,16 @@ async function runOcr(base64, odoInputId) {
     if (json.success && json.odometer) {
       odoInput.value = json.odometer;
       toast('📷 ' + json.odometer.toLocaleString() + ' km を読み取りました');
+      odoInput.placeholder = origPlaceholder;
     } else {
       const detail = json.rawText || json.error || '応答なし';
       odoInput.placeholder = '読取失敗: ' + detail.substring(0, 40);
       toast('読み取り失敗 — 手動で入力してください');
     }
   } catch(e) {
-    toast('読み取り失敗: ' + e.message);
+    odoInput.placeholder = '通信エラー: ' + e.message.substring(0, 35);
+    toast('読み取り失敗 — 手動で入力してください');
   } finally {
-    odoInput.placeholder = origPlaceholder;
     odoInput.disabled = false;
     odoInput.focus();
   }
