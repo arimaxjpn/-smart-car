@@ -97,7 +97,7 @@
     .content { padding: 20px 20px 0; }
 
     /* ---- 目的ボタン ---- */
-    .purpose-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .purpose-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
     .purpose-btn {
       background: var(--bg3); border: 2px solid transparent;
       border-radius: 10px; padding: 14px 8px;
@@ -219,7 +219,7 @@
       <div class="purpose-grid">
         <button class="purpose-btn" onclick="selectPurpose(this,'現場移動')">現場移動</button>
         <button class="purpose-btn" onclick="selectPurpose(this,'前日乗り込み')">前日乗り込み</button>
-        <button class="purpose-btn full" onclick="selectPurpose(this,'__other__')">その他</button>
+        <button class="purpose-btn" onclick="selectPurpose(this,'__other__')">その他</button>
       </div>
       <input type="text" id="other-input" placeholder="目的を入力" style="display:none;" />
     </div>
