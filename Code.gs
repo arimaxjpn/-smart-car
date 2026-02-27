@@ -240,13 +240,13 @@ function ocrImageGemini_(base64Data) {
     throw new Error('Gemini APIキーが未設定です。設定シートのB7に入力してください。');
   }
 
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + apiKey;
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + apiKey;
 
   const payload = {
     contents: [{
       parts: [
         {
-          text: 'この車載メーターの画像からODO（オドメーター）の数値をkm単位で読み取り、数字のみを返してください。例：73577'
+          text: 'この車載メーターの画像からODO（オドメーター）の数値をkm単位で読み取ってください。保護パネルに傷や反射があっても、見えている数字から最善の推測をしてください。数字のみを返してください（例：73577）。どうしても読めない場合のみ「不明」と返してください。'
         },
         {
           inline_data: { mime_type: 'image/jpeg', data: base64Data }
