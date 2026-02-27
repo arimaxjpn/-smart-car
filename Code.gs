@@ -63,6 +63,7 @@ function doPost(e) {
     switch (data.type) {
       case 'start':  return startTrip_(data);
       case 'end':    return endTrip_(data);
+      case 'ocr':    return runOcr_(data);
       case 'report': return generateMonthlyPDF_(data.year, data.month);
       case 'edit':   return editRecord_(data);
       default:
@@ -209,6 +210,73 @@ function endTrip_(data) {
   sheet.getRange(targetRow, 18).setValue('closed');         // R: ステータス
 
   return jsonResponse_({ success: true, distance: distance, odometer: startOdometer, ...warning });
+}
+
+// ============================================================
+// OCR（Gemini Vision API でメーター値を読み取る）
+// POST { type:'ocr', token:'...', photo:'base64...' }
+// 事前に設定シートの B7 に Gemini API キーを入力すること
+// API キー取得先: https://aistudio.google.com/
+// ============================================================
+
+function runOcr_(data) {
+  if (!data.photo) {
+    return jsonResponse_({ success: false, error: '写真がありません' });
+  }
+  try {
+    const rawText  = ocrImageGemini_(data.photo);
+    const odometer = parseOdometer_(rawText);
+    return jsonResponse_({ success: true, rawText: rawText, odometer: odometer });
+  } catch (err) {
+    return jsonResponse_({ success: false, error: err.message });
+  }
+}
+
+function ocrImageGemini_(base64Data) {
+  const config = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG_SHEET);
+  const apiKey = config.getRange('B7').getValue();
+
+  if (!apiKey || String(apiKey).trim() === '' || apiKey === '（入力してください）') {
+    throw new Error('Gemini APIキーが未設定です。設定シートのB7に入力してください。');
+  }
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + apiKey;
+
+  const payload = {
+    contents: [{
+      parts: [
+        {
+          text: 'この車載メーターの画像からODO（オドメーター）の数値をkm単位で読み取り、数字のみを返してください。例：73577'
+        },
+        {
+          inline_data: { mime_type: 'image/jpeg', data: base64Data }
+        }
+      ]
+    }]
+  };
+
+  const response = UrlFetchApp.fetch(url, {
+    method: 'POST',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  const json = JSON.parse(response.getContentText());
+
+  if (json.error) {
+    throw new Error('Gemini APIエラー: ' + json.error.message);
+  }
+
+  return json.candidates[0].content.parts[0].text.trim();
+}
+
+function parseOdometer_(text) {
+  // Geminiは数字のみを返すはずだが、念のため4〜6桁の数字を抽出
+  const cleaned = text.replace(/[,.\s\n]/g, '');
+  const matches = cleaned.match(/\d{4,6}/g);
+  if (!matches) return null;
+  return Math.max(...matches.map(Number));
 }
 
 // ============================================================
