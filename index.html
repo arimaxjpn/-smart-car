@@ -620,7 +620,6 @@ function capturePhoto() {
   const vr = video.getBoundingClientRect();
   const gr = guide.getBoundingClientRect();
 
-  // ガイド枠の座標をビデオ実解像度に変換
   const scaleX = video.videoWidth  / vr.width;
   const scaleY = video.videoHeight / vr.height;
   const cx = (gr.left - vr.left) * scaleX;
@@ -628,20 +627,21 @@ function capturePhoto() {
   const cw = gr.width  * scaleX;
   const ch = gr.height * scaleY;
 
-  // ① 切り取り（Drive保存・プレビュー用）
-  const cvs = document.createElement('canvas');
-  cvs.width = Math.round(cw); cvs.height = Math.round(ch);
-  const ctx = cvs.getContext('2d');
-  ctx.drawImage(video, cx, cy, cw, ch, 0, 0, cvs.width, cvs.height);
-  const dataUrl = cvs.toDataURL('image/jpeg', 0.85);
-  const b64 = dataUrl.split(',')[1];
+  // ① フル画像（Drive保存・プレビュー用）— 信憑性のため全体を保存
+  const scale = video.videoWidth > 1920 ? 1920 / video.videoWidth : 1;
+  const cvsFull = document.createElement('canvas');
+  cvsFull.width  = Math.round(video.videoWidth  * scale);
+  cvsFull.height = Math.round(video.videoHeight * scale);
+  cvsFull.getContext('2d').drawImage(video, 0, 0, cvsFull.width, cvsFull.height);
+  const dataUrlFull = cvsFull.toDataURL('image/jpeg', 0.85);
+  const b64Full = dataUrlFull.split(',')[1];
 
-  // ② OCR用：色反転 + コントラスト強化
-  const cvs2 = document.createElement('canvas');
-  cvs2.width = cvs.width; cvs2.height = cvs.height;
-  const ctx2 = cvs2.getContext('2d');
-  ctx2.drawImage(cvs, 0, 0);
-  const id = ctx2.getImageData(0, 0, cvs2.width, cvs2.height);
+  // ② OCR専用：ガイド枠で切り取り + 色反転 + コントラスト強化（保存しない）
+  const cvsOcr = document.createElement('canvas');
+  cvsOcr.width = Math.round(cw); cvsOcr.height = Math.round(ch);
+  const ctxOcr = cvsOcr.getContext('2d');
+  ctxOcr.drawImage(video, cx, cy, cw, ch, 0, 0, cvsOcr.width, cvsOcr.height);
+  const id = ctxOcr.getImageData(0, 0, cvsOcr.width, cvsOcr.height);
   const d = id.data;
   const f = 1.8;
   for (let i = 0; i < d.length; i += 4) {
@@ -652,18 +652,20 @@ function capturePhoto() {
     d[i+1] = Math.min(255, Math.max(0, f * (d[i+1] - 128) + 128));
     d[i+2] = Math.min(255, Math.max(0, f * (d[i+2] - 128) + 128));
   }
-  ctx2.putImageData(id, 0, 0);
-  const b64Ocr = cvs2.toDataURL('image/jpeg', 0.9).split(',')[1];
+  ctxOcr.putImageData(id, 0, 0);
+  const b64Ocr = cvsOcr.toDataURL('image/jpeg', 0.9).split(',')[1];
 
   closeCamera();
 
   const isStart   = activeCameraTarget === 'start';
   const previewId = isStart ? 'photo-preview-start' : 'photo-preview-end';
   const odoId     = isStart ? 'odo-start' : 'odo-end';
-  if (isStart) photoBase64Start = b64; else photoBase64End = b64;
+
+  // フル画像をDrive保存用として設定
+  if (isStart) photoBase64Start = b64Full; else photoBase64End = b64Full;
 
   const prev = document.getElementById(previewId);
-  prev.src = dataUrl; prev.style.display = 'block';
+  prev.src = dataUrlFull; prev.style.display = 'block';
   prev.previousElementSibling.style.display = 'none';
 
   runOcr(b64Ocr, odoId);
