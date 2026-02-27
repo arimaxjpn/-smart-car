@@ -154,6 +154,33 @@
       pointer-events: none; white-space: nowrap; z-index: 100;
     }
     .toast.show { opacity: 1; }
+
+    /* ---- カメラモーダル ---- */
+    #camera-modal {
+      display: none; position: fixed; inset: 0; z-index: 200;
+      background: #000; flex-direction: column;
+    }
+    #camera-video {
+      position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    }
+    #camera-guide {
+      position: absolute; left: 7%; right: 7%; top: 20%; bottom: 26%;
+      border: 2.5px solid rgba(255,255,255,0.9); border-radius: 10px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.52); pointer-events: none;
+    }
+    .cam-corner {
+      position: absolute; width: 22px; height: 22px; border-color: #fff; border-style: solid;
+    }
+    .cam-corner.tl { top:-2px; left:-2px;   border-width:4px 0 0 4px; border-radius:5px 0 0 0; }
+    .cam-corner.tr { top:-2px; right:-2px;  border-width:4px 4px 0 0; border-radius:0 5px 0 0; }
+    .cam-corner.bl { bottom:-2px; left:-2px;  border-width:0 0 4px 4px; border-radius:0 0 0 5px; }
+    .cam-corner.br { bottom:-2px; right:-2px; border-width:0 4px 4px 0; border-radius:0 0 5px 0; }
+    .cam-shutter {
+      width: 76px; height: 76px; border-radius: 50%;
+      background: #fff; border: 5px solid rgba(255,255,255,0.4);
+      cursor: pointer; box-shadow: 0 2px 12px rgba(0,0,0,.5);
+    }
+    .cam-shutter:active { transform: scale(0.92); }
   </style>
 </head>
 <body>
@@ -199,7 +226,7 @@
 
     <div class="card card-expand">
       <div class="card-label">メーター写真</div>
-      <div class="photo-tap" onclick="document.getElementById('cam-start').click()">
+      <div class="photo-tap" onclick="openCamera('start')">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
       </div>
@@ -235,7 +262,7 @@
 
     <div class="card card-expand">
       <div class="card-label">メーター写真</div>
-      <div class="photo-tap" onclick="document.getElementById('cam-end').click()">
+      <div class="photo-tap" onclick="openCamera('end')">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
       </div>
@@ -261,6 +288,26 @@
   <div class="result-dist"  id="result-dist"></div>
   <div class="result-sub"   id="result-sub"></div>
   <button class="btn btn-gray" onclick="restart()" style="margin-top:12px; width:auto; padding:14px 40px;">完了</button>
+</div>
+
+<!-- カメラモーダル -->
+<div id="camera-modal">
+  <video id="camera-video" playsinline autoplay muted></video>
+  <div id="camera-guide">
+    <div class="cam-corner tl"></div>
+    <div class="cam-corner tr"></div>
+    <div class="cam-corner bl"></div>
+    <div class="cam-corner br"></div>
+  </div>
+  <div style="position:absolute;top:12%;width:100%;text-align:center;color:#fff;font-size:14px;font-weight:500;text-shadow:0 1px 4px rgba(0,0,0,.8);pointer-events:none;">
+    ODOメーターを枠に合わせてください
+  </div>
+  <button onclick="closeCamera()" style="position:absolute;top:16px;left:20px;background:rgba(0,0,0,.55);border:none;color:#fff;font-size:15px;padding:10px 18px;border-radius:20px;cursor:pointer;">
+    ✕ キャンセル
+  </button>
+  <div style="position:absolute;bottom:0;left:0;right:0;padding:20px 40px 50px;display:flex;justify-content:center;">
+    <button class="cam-shutter" onclick="capturePhoto()"></button>
+  </div>
 </div>
 
 <!-- トースト -->
@@ -540,6 +587,86 @@ function showResult(title, dist, sub) {
 function restart() {
   document.getElementById('screen-result').style.display = 'none';
   init();
+}
+
+// ---- カメラ ----
+let cameraStream = null;
+let activeCameraTarget = '';
+
+async function openCamera(target) {
+  activeCameraTarget = target;
+  const modal = document.getElementById('camera-modal');
+  modal.style.display = 'flex';
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    document.getElementById('camera-video').srcObject = cameraStream;
+  } catch(e) {
+    modal.style.display = 'none';
+    toast('カメラを起動できません — ファイルから選択してください');
+    document.getElementById(target === 'start' ? 'cam-start' : 'cam-end').click();
+  }
+}
+
+function closeCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  document.getElementById('camera-modal').style.display = 'none';
+}
+
+function capturePhoto() {
+  const video = document.getElementById('camera-video');
+  const guide = document.getElementById('camera-guide');
+  const vr = video.getBoundingClientRect();
+  const gr = guide.getBoundingClientRect();
+
+  // ガイド枠の座標をビデオ実解像度に変換
+  const scaleX = video.videoWidth  / vr.width;
+  const scaleY = video.videoHeight / vr.height;
+  const cx = (gr.left - vr.left) * scaleX;
+  const cy = (gr.top  - vr.top)  * scaleY;
+  const cw = gr.width  * scaleX;
+  const ch = gr.height * scaleY;
+
+  // ① 切り取り（Drive保存・プレビュー用）
+  const cvs = document.createElement('canvas');
+  cvs.width = Math.round(cw); cvs.height = Math.round(ch);
+  const ctx = cvs.getContext('2d');
+  ctx.drawImage(video, cx, cy, cw, ch, 0, 0, cvs.width, cvs.height);
+  const dataUrl = cvs.toDataURL('image/jpeg', 0.85);
+  const b64 = dataUrl.split(',')[1];
+
+  // ② OCR用：色反転 + コントラスト強化
+  const cvs2 = document.createElement('canvas');
+  cvs2.width = cvs.width; cvs2.height = cvs.height;
+  const ctx2 = cvs2.getContext('2d');
+  ctx2.drawImage(cvs, 0, 0);
+  const id = ctx2.getImageData(0, 0, cvs2.width, cvs2.height);
+  const d = id.data;
+  const f = 1.8;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i]   = 255 - d[i];
+    d[i+1] = 255 - d[i+1];
+    d[i+2] = 255 - d[i+2];
+    d[i]   = Math.min(255, Math.max(0, f * (d[i]   - 128) + 128));
+    d[i+1] = Math.min(255, Math.max(0, f * (d[i+1] - 128) + 128));
+    d[i+2] = Math.min(255, Math.max(0, f * (d[i+2] - 128) + 128));
+  }
+  ctx2.putImageData(id, 0, 0);
+  const b64Ocr = cvs2.toDataURL('image/jpeg', 0.9).split(',')[1];
+
+  closeCamera();
+
+  const isStart   = activeCameraTarget === 'start';
+  const previewId = isStart ? 'photo-preview-start' : 'photo-preview-end';
+  const odoId     = isStart ? 'odo-start' : 'odo-end';
+  if (isStart) photoBase64Start = b64; else photoBase64End = b64;
+
+  const prev = document.getElementById(previewId);
+  prev.src = dataUrl; prev.style.display = 'block';
+  prev.previousElementSibling.style.display = 'none';
+
+  runOcr(b64Ocr, odoId);
 }
 
 // ---- 起動 ----
