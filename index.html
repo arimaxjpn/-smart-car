@@ -151,6 +151,44 @@
       line-height: 1.4; display: none; word-break: break-all;
     }
 
+    /* ---- カメラモーダル ---- */
+    #cam-modal {
+      display: none; position: fixed; inset: 0; background: #000; z-index: 200;
+      flex-direction: column;
+    }
+    #cam-modal.active { display: flex; }
+    #cam-video-wrap { flex: 1; position: relative; overflow: hidden; }
+    #cam-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    #cam-guide {
+      position: absolute;
+      border: 2px solid rgba(255,255,255,0.85);
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+      pointer-events: none;
+    }
+    #cam-guide-odo {
+      position: absolute; bottom: 0; left: 0; width: 70%; height: 40%;
+      border: 2px solid #30d158; pointer-events: none;
+    }
+    #cam-guide-label {
+      position: absolute; top: -26px; left: 0;
+      color: #fff; font-size: 12px;
+      background: rgba(0,0,0,0.6); padding: 3px 8px; border-radius: 4px;
+      pointer-events: none;
+    }
+    #cam-controls {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 40px 44px; background: #000;
+    }
+    .cam-shutter {
+      width: 72px; height: 72px; border-radius: 50%;
+      background: #fff; border: 5px solid rgba(255,255,255,0.4);
+      cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
+    }
+    .cam-cancel-btn {
+      color: #fff; font-size: 16px; background: none; border: none;
+      cursor: pointer; padding: 8px; min-width: 72px;
+    }
+
     /* ---- トースト ---- */
     .toast {
       position: fixed; bottom: 36px; left: 50%;
@@ -206,13 +244,13 @@
 
     <div class="card card-expand">
       <div class="card-label">メーター写真</div>
-      <div class="photo-tap" onclick="document.getElementById('cam-start').click()">
+      <div class="photo-tap" onclick="openCamera('start')">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
-        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を正面から</span>
+        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を枠に合わせて</span>
       </div>
       <img id="photo-preview-start" />
-      <input type="file" id="cam-start" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-start')">
+      <input type="file" id="cam-file-start" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-start')" style="display:none;">
     </div>
 
     <div class="card">
@@ -244,13 +282,13 @@
 
     <div class="card card-expand">
       <div class="card-label">メーター写真</div>
-      <div class="photo-tap" onclick="document.getElementById('cam-end').click()">
+      <div class="photo-tap" onclick="openCamera('end')">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
-        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を正面から</span>
+        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を枠に合わせて</span>
       </div>
       <img id="photo-preview-end" />
-      <input type="file" id="cam-end" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-end')">
+      <input type="file" id="cam-file-end" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-end')" style="display:none;">
     </div>
 
     <div class="card">
@@ -274,6 +312,22 @@
   <button class="btn btn-gray" onclick="restart()" style="margin-top:12px; width:auto; padding:14px 40px;">完了</button>
 </div>
 
+<!-- カメラモーダル -->
+<div id="cam-modal">
+  <div id="cam-video-wrap">
+    <video id="cam-video" autoplay playsinline muted></video>
+    <div id="cam-guide">
+      <div id="cam-guide-odo"></div>
+      <div id="cam-guide-label">ここに合わせて撮影</div>
+    </div>
+  </div>
+  <div id="cam-controls">
+    <button class="cam-cancel-btn" onclick="closeCamera()">キャンセル</button>
+    <button class="cam-shutter" onclick="capturePhoto()"></button>
+    <div style="min-width:72px"></div>
+  </div>
+</div>
+
 <!-- トースト -->
 <div class="toast" id="toast"></div>
 
@@ -285,6 +339,81 @@ let currentTrip  = null;
 let selectedPurpose = '';
 let photoBase64Start = '';
 let photoBase64End   = '';
+
+// ---- カメラ ----
+let activeCameraTarget = '';
+let cameraStream = null;
+const GUIDE_RATIO = 1.9; // ダッシュボード表示パネルの縦横比
+
+async function openCamera(target) {
+  activeCameraTarget = target;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    document.getElementById('cam-file-' + target).click(); return;
+  }
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    document.getElementById('cam-video').srcObject = cameraStream;
+    document.getElementById('cam-modal').classList.add('active');
+    setTimeout(positionGuide, 120);
+  } catch(e) {
+    document.getElementById('cam-file-' + target).click();
+  }
+}
+
+function positionGuide() {
+  const wrap  = document.getElementById('cam-video-wrap');
+  const guide = document.getElementById('cam-guide');
+  const wW = wrap.clientWidth;
+  const wH = wrap.clientHeight;
+  const gW = Math.round(wW * 0.90);
+  const gH = Math.round(gW / GUIDE_RATIO);
+  const gX = Math.round((wW - gW) / 2);
+  const gY = Math.round((wH - gH) / 2);
+  guide.style.left   = gX + 'px';
+  guide.style.top    = gY + 'px';
+  guide.style.width  = gW + 'px';
+  guide.style.height = gH + 'px';
+}
+
+function closeCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  document.getElementById('cam-modal').classList.remove('active');
+}
+
+function capturePhoto() {
+  const video = document.getElementById('cam-video');
+  const wrap  = document.getElementById('cam-video-wrap');
+  const guide = document.getElementById('cam-guide');
+  const gX = parseInt(guide.style.left),  gY = parseInt(guide.style.top);
+  const gW = parseInt(guide.style.width), gH = parseInt(guide.style.height);
+  const wW = wrap.clientWidth, wH = wrap.clientHeight;
+  const vW = video.videoWidth,  vH = video.videoHeight;
+  // object-fit: cover のスケール計算
+  const cAsp = wW / wH, vAsp = vW / vH;
+  let scale, offX, offY;
+  if (vAsp > cAsp) { scale = wH / vH; offX = (wW - vW * scale) / 2; offY = 0; }
+  else             { scale = wW / vW; offX = 0; offY = (wH - vH * scale) / 2; }
+  // CSS座標 → 動画ピクセル座標
+  const cx = Math.max(0, Math.round((gX - offX) / scale));
+  const cy = Math.max(0, Math.round((gY - offY) / scale));
+  const cw = Math.min(Math.round(gW / scale), vW - cx);
+  const ch = Math.min(Math.round(gH / scale), vH - cy);
+  // リサイズしてキャンバスに書き出し
+  const MAX_W = 1024;
+  const s = cw > MAX_W ? MAX_W / cw : 1;
+  const canvas = document.createElement('canvas');
+  canvas.width  = Math.round(cw * s);
+  canvas.height = Math.round(ch * s);
+  canvas.getContext('2d').drawImage(video, cx, cy, cw, ch, 0, 0, canvas.width, canvas.height);
+  closeCamera();
+  processCanvas(canvas, 'photo-preview-' + activeCameraTarget);
+}
+
+window.addEventListener('resize', () => {
+  if (document.getElementById('cam-modal').classList.contains('active')) positionGuide();
+});
 
 // ---- 画面切替 ----
 function show(id) {
@@ -376,29 +505,41 @@ function handlePhoto(input, previewId) {
       canvas.width  = Math.round(img.width  * scale);
       canvas.height = Math.round(img.height * scale);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-      const b64 = dataUrl.split(',')[1];
-      if (previewId === 'photo-preview-start') photoBase64Start = b64;
-      else photoBase64End = b64;
-      const prev = document.getElementById(previewId);
-      prev.src = dataUrl; prev.style.display = 'block';
-      prev.previousElementSibling.style.display = 'none';
-      // OCR用: 下40%・左70%をクロップ（ODO位置に合わせた切り出し）
-      const cropCanvas = document.createElement('canvas');
-      const cropY = Math.round(canvas.height * 0.60);
-      const cropW = Math.round(canvas.width  * 0.70);
-      const cropH = canvas.height - cropY;
-      cropCanvas.width  = cropW;
-      cropCanvas.height = cropH;
-      cropCanvas.getContext('2d').drawImage(canvas, 0, cropY, cropW, cropH, 0, 0, cropW, cropH);
-      const ocrB64 = cropCanvas.toDataURL('image/jpeg', 0.9).split(',')[1];
-      // OCR 自動読み取り
-      const odoId = previewId === 'photo-preview-start' ? 'odo-start' : 'odo-end';
-      runOcr(ocrB64, odoId);
+      processCanvas(canvas, previewId);
     };
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
+}
+
+function processCanvas(canvas, previewId) {
+  // Drive保存用（クリーン）
+  const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+  if (previewId === 'photo-preview-start') photoBase64Start = b64;
+  else photoBase64End = b64;
+  // OCR用クロップ（下40%・左70%）
+  const cropCanvas = document.createElement('canvas');
+  const cropY = Math.round(canvas.height * 0.60);
+  const cropW = Math.round(canvas.width  * 0.70);
+  const cropH = canvas.height - cropY;
+  cropCanvas.width  = cropW;
+  cropCanvas.height = cropH;
+  cropCanvas.getContext('2d').drawImage(canvas, 0, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  const ocrB64 = cropCanvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  // プレビュー（OCR範囲を緑枠で表示）
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(0, 0, canvas.width, cropY);
+  ctx.fillRect(cropW, cropY, canvas.width - cropW, cropH);
+  ctx.strokeStyle = '#30d158';
+  ctx.lineWidth = Math.max(2, Math.round(canvas.width / 300));
+  ctx.strokeRect(0, cropY, cropW, cropH);
+  const prev = document.getElementById(previewId);
+  prev.src = canvas.toDataURL('image/jpeg', 0.85);
+  prev.style.display = 'block';
+  prev.previousElementSibling.style.display = 'none';
+  const odoId = previewId === 'photo-preview-start' ? 'odo-start' : 'odo-end';
+  runOcr(ocrB64, odoId);
 }
 
 async function runOcr(base64, odoInputId) {
