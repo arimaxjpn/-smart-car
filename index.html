@@ -145,6 +145,12 @@
     .result-dist  { font-size: 52px; font-weight: 700; color: var(--green); }
     .result-sub   { color: var(--text2); font-size: 15px; }
 
+    /* ---- OCRエラー ---- */
+    .ocr-error {
+      font-size: 11px; color: var(--red); margin-top: 6px;
+      line-height: 1.4; display: none; word-break: break-all;
+    }
+
     /* ---- トースト ---- */
     .toast {
       position: fixed; bottom: 36px; left: 50%;
@@ -203,6 +209,7 @@
       <div class="photo-tap" onclick="document.getElementById('cam-start').click()">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
+        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を正面から</span>
       </div>
       <img id="photo-preview-start" />
       <input type="file" id="cam-start" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-start')">
@@ -211,6 +218,7 @@
     <div class="card">
       <div class="card-label">メーター値 (km)</div>
       <input type="number" id="odo-start" placeholder="例: 12345" inputmode="numeric" />
+      <div class="ocr-error" id="ocr-error-start"></div>
     </div>
 
   </div>
@@ -239,6 +247,7 @@
       <div class="photo-tap" onclick="document.getElementById('cam-end').click()">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
+        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を正面から</span>
       </div>
       <img id="photo-preview-end" />
       <input type="file" id="cam-end" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-end')">
@@ -247,6 +256,7 @@
     <div class="card">
       <div class="card-label">メーター値 (km)</div>
       <input type="number" id="odo-end" placeholder="例: 12389" inputmode="numeric" />
+      <div class="ocr-error" id="ocr-error-end"></div>
     </div>
 
   </div>
@@ -373,9 +383,18 @@ function handlePhoto(input, previewId) {
       const prev = document.getElementById(previewId);
       prev.src = dataUrl; prev.style.display = 'block';
       prev.previousElementSibling.style.display = 'none';
+      // OCR用: 下40%・左70%をクロップ（ODO位置に合わせた切り出し）
+      const cropCanvas = document.createElement('canvas');
+      const cropY = Math.round(canvas.height * 0.60);
+      const cropW = Math.round(canvas.width  * 0.70);
+      const cropH = canvas.height - cropY;
+      cropCanvas.width  = cropW;
+      cropCanvas.height = cropH;
+      cropCanvas.getContext('2d').drawImage(canvas, 0, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      const ocrB64 = cropCanvas.toDataURL('image/jpeg', 0.9).split(',')[1];
       // OCR 自動読み取り
       const odoId = previewId === 'photo-preview-start' ? 'odo-start' : 'odo-end';
-      runOcr(b64, odoId);
+      runOcr(ocrB64, odoId);
     };
     img.src = e.target.result;
   };
@@ -384,10 +403,12 @@ function handlePhoto(input, previewId) {
 
 async function runOcr(base64, odoInputId) {
   const odoInput = document.getElementById(odoInputId);
+  const errDiv   = document.getElementById(odoInputId.replace('odo-', 'ocr-error-'));
   const origPlaceholder = odoInput.placeholder;
   odoInput.value = '';
   odoInput.placeholder = '📷 読み取り中...';
   odoInput.disabled = true;
+  if (errDiv) { errDiv.textContent = ''; errDiv.style.display = 'none'; }
   try {
     const res = await fetch(GAS_URL, {
       method: 'POST',
@@ -397,15 +418,17 @@ async function runOcr(base64, odoInputId) {
     const json = await res.json();
     if (json.success && json.odometer) {
       odoInput.value = json.odometer;
-      toast('📷 ' + json.odometer.toLocaleString() + ' km を読み取りました');
       odoInput.placeholder = origPlaceholder;
+      toast('📷 ' + json.odometer.toLocaleString() + ' km を読み取りました');
     } else {
       const detail = json.rawText || json.error || '応答なし';
-      odoInput.placeholder = '読取失敗: ' + detail.substring(0, 40);
+      odoInput.placeholder = origPlaceholder;
+      if (errDiv) { errDiv.textContent = '読取失敗: ' + detail; errDiv.style.display = 'block'; }
       toast('読み取り失敗 — 手動で入力してください');
     }
   } catch(e) {
-    odoInput.placeholder = '通信エラー: ' + e.message.substring(0, 35);
+    odoInput.placeholder = origPlaceholder;
+    if (errDiv) { errDiv.textContent = '通信エラー: ' + e.message; errDiv.style.display = 'block'; }
     toast('読み取り失敗 — 手動で入力してください');
   } finally {
     odoInput.disabled = false;
