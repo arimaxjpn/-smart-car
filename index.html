@@ -118,9 +118,12 @@
     }
     .photo-tap:active { opacity: .7; }
     .photo-icon { font-size: 32px; }
-    #photo-preview-start, #photo-preview-end {
-      width: 100%; border-radius: 10px; max-height: 200px;
-      object-fit: cover; display: none; margin-top: 10px;
+    .retake-overlay {
+      position: absolute; bottom: 10px; right: 10px;
+      background: rgba(0,0,0,0.6); color: #fff;
+      border: none; border-radius: 8px;
+      padding: 6px 12px; font-size: 13px;
+      cursor: pointer; -webkit-appearance: none;
     }
     input[type="file"] { display: none; }
 
@@ -218,7 +221,7 @@
     <div class="status-label">乗車前</div>
   </div>
   <div class="content">
-    <h1>🚗 乗車記録 <span style="font-size:12px;color:var(--text2);font-weight:400;">03/01-A</span></h1>
+    <h1>🚗 乗車記録 <span style="font-size:12px;color:var(--text2);font-weight:400;">03/01-B</span></h1>
     <p class="sub">出発時のメーターを撮影します</p>
 
     <div class="card">
@@ -238,14 +241,16 @@
         <span>タップして撮影</span>
         <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を枠に合わせて</span>
       </div>
-      <img id="photo-preview-start" />
-      <button class="btn btn-gray" id="retake-start" onclick="retakePhoto('start')" style="display:none; margin-top:10px; font-size:15px;">📷 取り直す</button>
+      <div id="photo-wrap-start" style="position:relative; display:none; margin-top:10px;">
+        <img id="photo-preview-start" style="width:100%; border-radius:10px;" />
+        <button class="retake-overlay" onclick="retakePhoto('start')">📷 取り直し</button>
+      </div>
       <input type="file" id="cam-file-start" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-start')" style="display:none;">
     </div>
 
   </div>
   <div class="btn-area">
-    <button class="btn btn-blue" onclick="submitStart()">乗車記録</button>
+    <button class="btn btn-blue" onclick="submitStart()">記録開始</button>
   </div>
 </div>
 
@@ -271,8 +276,10 @@
         <span>タップして撮影</span>
         <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を枠に合わせて</span>
       </div>
-      <img id="photo-preview-end" />
-      <button class="btn btn-gray" id="retake-end" onclick="retakePhoto('end')" style="display:none; margin-top:10px; font-size:15px;">📷 取り直す</button>
+      <div id="photo-wrap-end" style="position:relative; display:none; margin-top:10px;">
+        <img id="photo-preview-end" style="width:100%; border-radius:10px;" />
+        <button class="retake-overlay" onclick="retakePhoto('end')">📷 取り直し</button>
+      </div>
       <input type="file" id="cam-file-end" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-end')" style="display:none;">
     </div>
 
@@ -295,7 +302,7 @@
   <div id="cam-video-wrap">
     <video id="cam-video" autoplay playsinline muted></video>
     <div id="cam-guide">
-      <div id="cam-guide-label">ここに合わせて撮影</div>
+      <div id="cam-guide-label">ODOメーターを枠に合わせて</div>
     </div>
   </div>
   <div id="cam-controls">
@@ -345,7 +352,7 @@ function positionGuide() {
   const guide = document.getElementById('cam-guide');
   const wW = wrap.clientWidth;
   const wH = wrap.clientHeight;
-  const gW = Math.round(wW * 0.90);
+  const gW = Math.round(wW * 0.65);
   const gH = Math.round(gW / GUIDE_RATIO);
   const gX = Math.round((wW - gW) / 2);
   const gY = Math.round((wH - gH) / 2);
@@ -469,11 +476,11 @@ function resetStart() {
   document.getElementById('other-input').style.display = 'none';
   document.getElementById('other-input').value = '';
   const prev = document.getElementById('photo-preview-start');
-  prev.style.display = 'none'; prev.src = '';
+  prev.src = '';
+  document.getElementById('photo-wrap-start').style.display = 'none';
   document.getElementById('photo-tap-start').style.display = 'flex';
-  document.getElementById('retake-start').style.display = 'none';
-  const btn = document.querySelector('#screen-start .btn');
-  btn.disabled = false; btn.textContent = '乗車記録';
+  const btn = document.querySelector('#screen-start .btn-blue');
+  btn.disabled = false; btn.textContent = '記録開始';
   startLocationAcquisition();
 }
 
@@ -512,19 +519,18 @@ function processCanvas(canvas, previewId) {
   else photoBase64End = b64;
   const prev = document.getElementById(previewId);
   prev.src = canvas.toDataURL('image/jpeg', 0.85);
-  prev.style.display = 'block';
   const target = previewId === 'photo-preview-start' ? 'start' : 'end';
   document.getElementById('photo-tap-' + target).style.display = 'none';
-  document.getElementById('retake-' + target).style.display = 'block';
+  document.getElementById('photo-wrap-' + target).style.display = 'block';
 }
 
 function retakePhoto(target) {
   if (target === 'start') photoBase64Start = '';
   else photoBase64End = '';
   const prev = document.getElementById('photo-preview-' + target);
-  prev.style.display = 'none'; prev.src = '';
+  prev.src = '';
+  document.getElementById('photo-wrap-' + target).style.display = 'none';
   document.getElementById('photo-tap-' + target).style.display = 'flex';
-  document.getElementById('retake-' + target).style.display = 'none';
   openCamera(target);
 }
 
@@ -557,7 +563,7 @@ async function submitStart() {
   if (!purpose)        { toast('業務目的を選択してください'); return; }
   if (!photoBase64Start) { toast('写真を撮影してください'); return; }
 
-  const btn = document.querySelector('#screen-start .btn');
+  const btn = document.querySelector('#screen-start .btn-blue');
   btn.disabled = true; btn.textContent = '位置情報取得中...';
 
   const loc = await locationPromise;
@@ -579,7 +585,7 @@ async function submitStart() {
     showResult('乗車記録完了', '降車時にアプリを開いてください');
   } catch(e) {
     toast('エラー: ' + e.message);
-    btn.disabled = false; btn.textContent = '乗車記録';
+    btn.disabled = false; btn.textContent = '記録開始';
   }
 }
 
@@ -600,7 +606,7 @@ function buildTripInfo() {
 async function submitEnd() {
   if (!photoBase64End) { toast('写真を撮影してください'); return; }
 
-  const btn = document.querySelector('#screen-end .btn');
+  const btn = document.querySelector('#screen-end .btn-red');
   btn.disabled = true; btn.textContent = '位置情報取得中...';
 
   const loc = await locationPromise;
