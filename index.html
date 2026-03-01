@@ -221,17 +221,12 @@
     <div class="status-label">乗車前</div>
   </div>
   <div class="content">
-    <h1>🚗 乗車記録 <span style="font-size:12px;color:var(--text2);font-weight:400;">03/01-B</span></h1>
+    <h1>🚗 乗車記録 <span style="font-size:12px;color:var(--text2);font-weight:400;">03/01-C</span></h1>
     <p class="sub">出発時のメーターを撮影します</p>
 
     <div class="card">
-      <div class="card-label">業務目的</div>
-      <div class="purpose-grid">
-        <button class="purpose-btn" onclick="selectPurpose(this,'現場移動')">現場移動</button>
-        <button class="purpose-btn" onclick="selectPurpose(this,'前日乗り込み')">前日乗り込み</button>
-        <button class="purpose-btn" onclick="selectPurpose(this,'__other__')">その他</button>
-      </div>
-      <input type="text" id="other-input" placeholder="目的を入力" style="display:none;" />
+      <div class="card-label">現在地情報</div>
+      <div id="start-info"></div>
     </div>
 
     <div class="card card-expand">
@@ -250,7 +245,18 @@
 
   </div>
   <div class="btn-area">
-    <button class="btn btn-blue" onclick="submitStart()">記録開始</button>
+    <div id="purpose-btns">
+      <div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:10px;">業務目的を選んで記録開始</div>
+      <div class="purpose-grid">
+        <button class="purpose-btn" onclick="selectAndSubmit(this,'現場移動')">現場移動</button>
+        <button class="purpose-btn" onclick="selectAndSubmit(this,'前日乗り込み')">前日乗り込み</button>
+        <button class="purpose-btn" onclick="showOtherInput()">その他</button>
+      </div>
+    </div>
+    <div id="other-area" style="display:none;">
+      <input type="text" id="other-input" placeholder="業務目的を入力" style="margin-bottom:8px;" />
+      <button class="btn btn-blue" onclick="submitStart()">記録開始</button>
+    </div>
   </div>
 </div>
 
@@ -352,7 +358,7 @@ function positionGuide() {
   const guide = document.getElementById('cam-guide');
   const wW = wrap.clientWidth;
   const wH = wrap.clientHeight;
-  const gW = Math.round(wW * 0.65);
+  const gW = Math.round(wW * 0.55);
   const gH = Math.round(gW / GUIDE_RATIO);
   const gX = Math.round((wW - gW) / 2);
   const gY = Math.round((wH - gH) / 2);
@@ -469,28 +475,54 @@ function saveSetup() {
 }
 
 // ---- 乗車画面 ----
+function buildStartInfo() {
+  const now = new Date();
+  const timeStr = now.toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+  document.getElementById('start-info').innerHTML =
+    '<div class="info-row"><span class="info-key">現在時刻</span><span class="info-val">' + timeStr + '</span></div>' +
+    '<div class="info-row"><span class="info-key">現在地</span><span class="info-val" id="start-address">取得中...</span></div>';
+  if (locationPromise) {
+    locationPromise.then(loc => {
+      const el = document.getElementById('start-address');
+      if (el) el.textContent = loc.address || '取得できませんでした';
+    });
+  }
+}
+
 function resetStart() {
   selectedPurpose  = '';
   photoBase64Start = '';
-  document.querySelectorAll('.purpose-btn').forEach(b => b.classList.remove('selected'));
-  document.getElementById('other-input').style.display = 'none';
+  document.querySelectorAll('.purpose-btn').forEach(b => { b.classList.remove('selected'); b.disabled = false; });
+  document.getElementById('purpose-btns').style.display = 'block';
+  document.getElementById('other-area').style.display = 'none';
   document.getElementById('other-input').value = '';
   const prev = document.getElementById('photo-preview-start');
   prev.src = '';
   document.getElementById('photo-wrap-start').style.display = 'none';
   document.getElementById('photo-tap-start').style.display = 'flex';
-  const btn = document.querySelector('#screen-start .btn-blue');
-  btn.disabled = false; btn.textContent = '記録開始';
   startLocationAcquisition();
+  buildStartInfo();
 }
 
-function selectPurpose(btn, val) {
-  document.querySelectorAll('.purpose-btn').forEach(b => b.classList.remove('selected'));
-  btn.classList.add('selected');
-  selectedPurpose = val;
-  const oi = document.getElementById('other-input');
-  if (val === '__other__') { oi.style.display = 'block'; oi.focus(); }
-  else { oi.style.display = 'none'; }
+async function selectAndSubmit(btn, purpose) {
+  if (!photoBase64Start) { toast('写真を撮影してください'); return; }
+  selectedPurpose = purpose;
+  document.querySelectorAll('#purpose-btns .purpose-btn').forEach(b => b.disabled = true);
+  const origText = btn.textContent;
+  btn.textContent = '送信中...';
+  try {
+    await doSubmitStart(purpose);
+  } catch(e) {
+    toast('エラー: ' + e.message);
+    document.querySelectorAll('#purpose-btns .purpose-btn').forEach(b => b.disabled = false);
+    btn.textContent = origText;
+  }
+}
+
+function showOtherInput() {
+  document.getElementById('purpose-btns').style.display = 'none';
+  document.getElementById('other-area').style.display = 'block';
+  document.getElementById('other-input').focus();
 }
 
 function handlePhoto(input, previewId) {
@@ -556,33 +588,32 @@ async function getAddress(lat, lon) {
   }
 }
 
-async function submitStart() {
-  const purpose = selectedPurpose === '__other__'
-    ? document.getElementById('other-input').value.trim()
-    : selectedPurpose;
-  if (!purpose)        { toast('業務目的を選択してください'); return; }
-  if (!photoBase64Start) { toast('写真を撮影してください'); return; }
-
-  const btn = document.querySelector('#screen-start .btn-blue');
-  btn.disabled = true; btn.textContent = '位置情報取得中...';
-
+async function doSubmitStart(purpose) {
   const loc = await locationPromise;
-  btn.textContent = '送信中...';
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({
+      token: getToken(), type: 'start',
+      datetime: new Date().toISOString(),
+      lat: loc.lat, lon: loc.lon, address: loc.address,
+      purpose: purpose,
+      photo: photoBase64Start
+    })
+  });
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error);
+  showResult('乗車記録完了', '降車時にアプリを開いてください');
+}
+
+async function submitStart() {
+  const purpose = document.getElementById('other-input').value.trim();
+  if (!purpose) { toast('目的を入力してください'); return; }
+  if (!photoBase64Start) { toast('写真を撮影してください'); return; }
+  const btn = document.querySelector('#other-area .btn-blue');
+  btn.disabled = true; btn.textContent = '送信中...';
   try {
-    const res = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({
-        token: getToken(), type: 'start',
-        datetime: new Date().toISOString(),
-        lat: loc.lat, lon: loc.lon, address: loc.address,
-        purpose: purpose,
-        photo: photoBase64Start
-      })
-    });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.error);
-    showResult('乗車記録完了', '降車時にアプリを開いてください');
+    await doSubmitStart(purpose);
   } catch(e) {
     toast('エラー: ' + e.message);
     btn.disabled = false; btn.textContent = '記録開始';
