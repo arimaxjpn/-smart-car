@@ -331,6 +331,85 @@ let photoBase64Start = '';
 let photoBase64End   = '';
 let locationPromise  = null;
 
+// ---- 停車検知・アラーム ----
+let audioCtx      = null;
+let stopWatchId   = null;
+let stopTimer     = null;
+let alarmTimer    = null;
+let isAlarmActive = false;
+
+document.addEventListener('touchstart', () => {
+  ensureAudio();
+  if (isAlarmActive) stopAlarmOnly();
+}, { passive: true });
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    ensureAudio();
+    if (isAlarmActive) stopAlarmOnly();
+  }
+});
+
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) { return; }
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+}
+
+function startStopWatch() {
+  if (!navigator.geolocation) return;
+  stopStopWatch();
+  stopWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      const speed = pos.coords.speed;
+      const kmh   = speed !== null ? speed * 3.6 : null;
+      if (kmh !== null && kmh < 3) {
+        if (!stopTimer && !isAlarmActive) {
+          stopTimer = setTimeout(playArrivalAlarm, 60 * 1000);
+        }
+      } else if (kmh !== null && kmh >= 3) {
+        clearTimeout(stopTimer); stopTimer = null;
+      }
+    },
+    () => {},
+    { enableHighAccuracy: true, timeout: 30000, maximumAge: 3000 }
+  );
+}
+
+function stopStopWatch() {
+  if (stopWatchId !== null) { navigator.geolocation.clearWatch(stopWatchId); stopWatchId = null; }
+  clearTimeout(stopTimer); stopTimer = null;
+  stopAlarmOnly();
+}
+
+function stopAlarmOnly() {
+  isAlarmActive = false;
+  clearTimeout(alarmTimer); alarmTimer = null;
+  clearTimeout(stopTimer);  stopTimer  = null;
+}
+
+function playArrivalAlarm() {
+  isAlarmActive = true;
+  ensureAudio();
+  function beep() {
+    if (!isAlarmActive || !audioCtx) return;
+    try {
+      const osc  = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+      osc.start(audioCtx.currentTime);
+      osc.stop(audioCtx.currentTime + 0.4);
+    } catch(e) {}
+    if (isAlarmActive) alarmTimer = setTimeout(beep, 2000);
+  }
+  beep();
+}
+
 // ---- カメラ ----
 let activeCameraTarget = '';
 let cameraStream = null;
@@ -456,6 +535,7 @@ async function init() {
       buildTripInfo();
       startLocationAcquisition();
       show('end');
+      startStopWatch();
     } else {
       currentTrip = null;
       resetStart();
@@ -656,6 +736,7 @@ async function submitEnd() {
     });
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
+    stopStopWatch();
     showResult('降車記録完了', '記録しました');
   } catch(e) {
     toast('エラー: ' + e.message);
