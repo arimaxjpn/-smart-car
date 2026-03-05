@@ -7,22 +7,27 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Smart Car">
   <title>Smart Car</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=IBM+Plex+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg:     #1c1c1e;
-      --bg2:    #2c2c2e;
-      --bg3:    #3a3a3c;
-      --accent: #0a84ff;
-      --green:  #30d158;
-      --red:    #ff453a;
-      --yellow: #ffd60a;
-      --text:   #ffffff;
-      --text2:  rgba(235,235,245,0.6);
-      --r:      12px;
+      --bg:      #0a0c10;
+      --bg2:     #12151c;
+      --bg3:     #1a1e28;
+      --accent:  #2560dd;
+      --green:   #139c5c;
+      --red:     #da2c4e;
+      --yellow:  #c57f00;
+      --text:    #f0f2f5;
+      --text2:   #8a93a8;
+      --text3:   #4a5168;
+      --border:  #ffffff14;
+      --border2: #ffffff28;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100svh;
@@ -32,37 +37,42 @@
     .screen { display: none; }
     .screen.active { display: block; }
 
-    h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
-    .sub { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
+    h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .sub { color: var(--text2); font-size: 0.875rem; margin-bottom: 1.5rem; }
 
-    .card { background: var(--bg2); border-radius: var(--r); padding: 16px; margin-bottom: 12px; }
-    .card-label { font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; }
+    .card {
+      background: var(--bg2); border-radius: 20px; padding: 1.5rem;
+      margin-bottom: 0.75rem; border: 1px solid var(--border);
+    }
+    .card-label { font-size: 0.75rem; color: var(--text2); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 0.625rem; font-weight: 600; }
 
     input[type="text"] {
-      width: 100%; background: var(--bg3); border: 1.5px solid transparent;
-      border-radius: 10px; padding: 14px; color: var(--text);
-      font-size: 17px; outline: none; -webkit-appearance: none;
-      transition: border-color .15s;
+      width: 100%; background: var(--bg2); border: 1px solid var(--border2);
+      border-radius: 12px; padding: 0.75rem 1rem; color: var(--text);
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
+      font-size: 1.0625rem; outline: none; -webkit-appearance: none;
+      transition: border-color .15s, box-shadow .15s;
     }
-    input:focus { border-color: var(--accent); }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #2560dd33; }
 
     .btn {
-      width: 100%; border: none; border-radius: var(--r);
-      padding: 17px; font-size: 17px; font-weight: 600;
+      width: 100%; border: none; border-radius: 9999px;
+      padding: 1rem 1.5rem; font-size: 1.0625rem; font-weight: 700;
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
       cursor: pointer; -webkit-appearance: none; transition: opacity .15s;
     }
     .btn:disabled { opacity: 0.4; }
     .btn-blue  { background: var(--accent); color: #fff; }
     .btn-red   { background: var(--red);    color: #fff; }
-    .btn-gray  { background: var(--bg3);    color: var(--text2); }
+    .btn-gray  { background: var(--bg3); color: var(--text2); border: 1px solid var(--border2); }
 
     /* ---- ローディング ---- */
     #screen-loading {
       display: flex; align-items: center; justify-content: center;
-      flex-direction: column; gap: 16px; min-height: 100svh;
+      flex-direction: column; gap: 1rem; min-height: 100svh;
     }
     .spinner {
-      width: 36px; height: 36px;
+      width: 2.25rem; height: 2.25rem;
       border: 3px solid var(--bg3); border-top-color: var(--accent);
       border-radius: 50%; animation: spin .8s linear infinite;
     }
@@ -70,59 +80,62 @@
 
     /* ---- セットアップ ---- */
     #screen-setup.active { display: flex; align-items: center; justify-content: center; min-height: 100svh; }
-    #screen-setup .inner { padding: 24px; max-width: 440px; width: 100%; }
-    #screen-setup h1 { margin-bottom: 6px; }
+    #screen-setup .inner { padding: 1.5rem; max-width: 440px; width: 100%; }
+    #screen-setup h1 { margin-bottom: 0.375rem; }
 
     /* ---- ステータスバー ---- */
     .status-bar {
-      background: var(--bg2); padding: 14px 20px;
-      display: flex; align-items: center; gap: 10px;
-      border-bottom: 1px solid var(--bg3);
+      background: var(--bg2); padding: 0.875rem 1.25rem;
+      display: flex; align-items: center; gap: 0.625rem;
+      border-bottom: 1px solid var(--border);
       position: sticky; top: 0; z-index: 10;
     }
-    .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; }
     .dot-green  { background: var(--green); }
     .dot-yellow { background: var(--yellow); }
-    .status-label { font-size: 14px; font-weight: 500; }
+    .status-label { font-size: 0.875rem; font-weight: 600; }
 
     /* ---- スマホ最適化：乗車・降車画面 ---- */
     #screen-start.active, #screen-end.active {
       display: flex; flex-direction: column; height: 100svh;
     }
     #screen-start .content, #screen-end .content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
-    .btn-area { padding: 12px 20px 36px; flex-shrink: 0; background: var(--bg); }
+    .btn-area { padding: 0.75rem 1.25rem 2.25rem; flex-shrink: 0; background: var(--bg); }
     .card-expand { flex: 1; display: flex; flex-direction: column; }
 
     /* ---- コンテンツ ---- */
-    .content { padding: 20px 20px 0; }
+    .content { padding: 1.25rem 1.25rem 0; }
 
     /* ---- 目的ボタン ---- */
-    .purpose-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .purpose-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.5rem; }
     .purpose-btn {
       background: var(--bg3); border: 2px solid transparent;
-      border-radius: 10px; padding: 14px 4px;
-      color: var(--text); font-size: 13px; font-weight: 500;
+      border-radius: 9999px; padding: 0.75rem 0.25rem;
+      color: var(--text); font-size: 0.8125rem; font-weight: 600;
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
       cursor: pointer; text-align: center;
       transition: all .15s; -webkit-appearance: none;
     }
-    .purpose-btn.selected { background: rgba(10,132,255,.18); border-color: var(--accent); color: var(--accent); }
+    .purpose-btn.selected { background: #2560dd1a; border-color: var(--accent); color: var(--accent); }
     .purpose-btn.full { grid-column: 1 / -1; }
-    #other-input { margin-top: 10px; }
+    #other-input { margin-top: 0.625rem; }
 
     /* ---- 写真 ---- */
     .photo-tap {
-      background: var(--bg3); border-radius: 10px; min-height: 130px; flex: 1;
+      background: var(--bg3); border-radius: 12px; min-height: 8rem; flex: 1;
       display: flex; flex-direction: column; align-items: center;
-      justify-content: center; gap: 8px; cursor: pointer;
-      color: var(--text2); font-size: 13px;
+      justify-content: center; gap: 0.5rem; cursor: pointer;
+      color: var(--text2); font-size: 0.8125rem;
+      border: 1px dashed var(--border2);
     }
     .photo-tap:active { opacity: .7; }
-    .photo-icon { font-size: 32px; }
+    .photo-icon { font-size: 2rem; }
     .retake-overlay {
-      position: absolute; bottom: 10px; right: 10px;
+      position: absolute; bottom: 0.625rem; right: 0.625rem;
       background: rgba(0,0,0,0.6); color: #fff;
-      border: none; border-radius: 8px;
-      padding: 6px 12px; font-size: 13px;
+      border: none; border-radius: 9999px;
+      padding: 0.375rem 0.75rem; font-size: 0.8125rem;
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
       cursor: pointer; -webkit-appearance: none;
     }
     input[type="file"] { display: none; }
@@ -130,22 +143,22 @@
     /* ---- 乗車情報 ---- */
     .info-row {
       display: flex; justify-content: space-between; align-items: baseline;
-      padding: 7px 0; border-bottom: 1px solid var(--bg3); font-size: 14px;
+      padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.875rem;
     }
     .info-row:last-child { border-bottom: none; }
     .info-key { color: var(--text2); }
-    .info-val { font-weight: 500; text-align: right; max-width: 65%; font-size: 13px; }
+    .info-val { font-weight: 500; text-align: right; max-width: 65%; font-size: 0.8125rem; }
 
     /* ---- 結果 ---- */
     #screen-result {
       display: none; align-items: center; justify-content: center;
-      flex-direction: column; gap: 18px; min-height: 100svh;
-      padding: 40px; text-align: center;
+      flex-direction: column; gap: 1.125rem; min-height: 100svh;
+      padding: 2.5rem; text-align: center;
     }
     #screen-result.active { display: flex; }
-    .result-icon  { font-size: 68px; }
-    .result-title { font-size: 22px; font-weight: 700; }
-    .result-sub   { color: var(--text2); font-size: 15px; }
+    .result-icon  { font-size: 4.25rem; }
+    .result-title { font-size: 1.5rem; font-weight: 700; }
+    .result-sub   { color: var(--text2); font-size: 0.9375rem; }
 
     /* ---- カメラモーダル ---- */
     #cam-modal {
@@ -162,32 +175,35 @@
       pointer-events: none;
     }
     #cam-guide-label {
-      position: absolute; top: -26px; left: 0;
-      color: #fff; font-size: 12px;
-      background: rgba(0,0,0,0.6); padding: 3px 8px; border-radius: 4px;
+      position: absolute; top: -1.625rem; left: 0;
+      color: #fff; font-size: 0.75rem;
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
+      background: rgba(0,0,0,0.6); padding: 0.1875rem 0.5rem; border-radius: 0.25rem;
       pointer-events: none;
     }
     #cam-controls {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 20px 40px 44px; background: #000;
+      padding: 1.25rem 2.5rem 2.75rem; background: #000;
     }
     .cam-shutter {
-      width: 72px; height: 72px; border-radius: 50%;
+      width: 4.5rem; height: 4.5rem; border-radius: 50%;
       background: #fff; border: 5px solid rgba(255,255,255,0.4);
       cursor: pointer; -webkit-appearance: none; flex-shrink: 0;
     }
     .cam-cancel-btn {
-      color: #fff; font-size: 16px; background: none; border: none;
-      cursor: pointer; padding: 8px; min-width: 72px;
+      color: #fff; font-size: 1rem; background: none; border: none;
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
+      cursor: pointer; padding: 0.5rem; min-width: 4.5rem;
     }
 
     /* ---- トースト ---- */
     .toast {
-      position: fixed; bottom: 36px; left: 50%;
-      transform: translateX(-50%); background: rgba(0,0,0,.85);
-      color: #fff; padding: 11px 22px; border-radius: 20px;
-      font-size: 14px; opacity: 0; transition: opacity .3s;
+      position: fixed; bottom: 2.25rem; left: 50%;
+      transform: translateX(-50%); background: var(--bg3);
+      color: var(--text); padding: 0.6875rem 1.375rem; border-radius: 9999px;
+      font-size: 0.875rem; opacity: 0; transition: opacity .3s;
       pointer-events: none; white-space: nowrap; z-index: 100;
+      border: 1px solid var(--border);
     }
     .toast.show { opacity: 1; }
 
@@ -198,19 +214,19 @@
 <!-- ローディング -->
 <div id="screen-loading">
   <div class="spinner"></div>
-  <div style="color:var(--text2);font-size:14px;">接続中...</div>
+  <div style="color:var(--text2);font-size:0.875rem;">接続中...</div>
 </div>
 
 <!-- セットアップ -->
 <div id="screen-setup" class="screen">
   <div class="inner">
     <h1>初回設定</h1>
-    <p class="sub" style="margin-bottom:32px;">認証トークンを入力してください<br>（設定シート B6 の値）</p>
+    <p class="sub" style="margin-bottom:2rem;">認証トークンを入力してください<br>（設定シート B6 の値）</p>
     <div class="card">
       <div class="card-label">認証トークン</div>
       <input type="text" id="input-token" placeholder="32文字のトークン" autocomplete="off" />
     </div>
-    <button class="btn btn-blue" onclick="saveSetup()" style="margin-top:8px;">保存して開始</button>
+    <button class="btn btn-blue" onclick="saveSetup()" style="margin-top:0.5rem;">保存して開始</button>
   </div>
 </div>
 
@@ -221,7 +237,7 @@
     <div class="status-label">乗車前</div>
   </div>
   <div class="content">
-    <h1>🚗 乗車記録 <span style="font-size:12px;color:var(--text2);font-weight:400;">03/04-A</span></h1>
+    <h1>🚗 乗車記録 <span style="font-size:0.75rem;color:var(--text2);font-weight:400;">03/05-A</span></h1>
     <p class="sub">出発時のメーターを撮影します</p>
 
     <div class="card">
@@ -234,10 +250,10 @@
       <div class="photo-tap" id="photo-tap-start" onclick="openCamera('start')">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
-        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を枠に合わせて</span>
+        <span style="font-size:0.6875rem;margin-top:0.125rem;">ダッシュボード全体を枠に合わせて</span>
       </div>
-      <div id="photo-wrap-start" style="position:relative; display:none; margin-top:10px;">
-        <img id="photo-preview-start" style="width:100%; border-radius:10px;" />
+      <div id="photo-wrap-start" style="position:relative; display:none; margin-top:0.625rem;">
+        <img id="photo-preview-start" style="width:100%; border-radius:0.75rem;" />
         <button class="retake-overlay" onclick="retakePhoto('start')">📷 取り直し</button>
       </div>
       <input type="file" id="cam-file-start" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-start')" style="display:none;">
@@ -246,7 +262,7 @@
   </div>
   <div class="btn-area">
     <div id="purpose-btns">
-      <div style="font-size:12px;color:var(--text2);text-align:center;margin-bottom:10px;">業務目的を選んで記録開始</div>
+      <div style="font-size:0.75rem;color:var(--text2);text-align:center;margin-bottom:0.625rem;">業務目的を選んで記録開始</div>
       <div class="purpose-grid">
         <button class="purpose-btn" onclick="selectAndSubmit(this,'現場移動')">現場移動</button>
         <button class="purpose-btn" onclick="selectAndSubmit(this,'前日乗り込み')">前日乗り込み</button>
@@ -254,7 +270,7 @@
       </div>
     </div>
     <div id="other-area" style="display:none;">
-      <input type="text" id="other-input" placeholder="業務目的を入力" style="margin-bottom:8px;" />
+      <input type="text" id="other-input" placeholder="業務目的を入力" style="margin-bottom:0.5rem;" />
       <button class="btn btn-blue" onclick="submitStart()">記録開始</button>
     </div>
   </div>
@@ -280,10 +296,10 @@
       <div class="photo-tap" id="photo-tap-end" onclick="openCamera('end')">
         <span class="photo-icon">📷</span>
         <span>タップして撮影</span>
-        <span style="font-size:11px;margin-top:2px;">ダッシュボード全体を枠に合わせて</span>
+        <span style="font-size:0.6875rem;margin-top:0.125rem;">ダッシュボード全体を枠に合わせて</span>
       </div>
-      <div id="photo-wrap-end" style="position:relative; display:none; margin-top:10px;">
-        <img id="photo-preview-end" style="width:100%; border-radius:10px;" />
+      <div id="photo-wrap-end" style="position:relative; display:none; margin-top:0.625rem;">
+        <img id="photo-preview-end" style="width:100%; border-radius:0.75rem;" />
         <button class="retake-overlay" onclick="retakePhoto('end')">📷 取り直し</button>
       </div>
       <input type="file" id="cam-file-end" accept="image/*" capture="environment" onchange="handlePhoto(this,'photo-preview-end')" style="display:none;">
@@ -300,7 +316,7 @@
   <div class="result-icon">✅</div>
   <div class="result-title" id="result-title"></div>
   <div class="result-sub"   id="result-sub"></div>
-  <button class="btn btn-gray" onclick="restart()" style="margin-top:12px; width:auto; padding:14px 40px;">完了</button>
+  <button class="btn btn-gray" onclick="restart()" style="margin-top:0.75rem; width:auto; padding:0.875rem 2.5rem;">完了</button>
 </div>
 
 <!-- カメラモーダル -->
@@ -314,7 +330,7 @@
   <div id="cam-controls">
     <button class="cam-cancel-btn" onclick="closeCamera()">キャンセル</button>
     <button class="cam-shutter" onclick="capturePhoto()"></button>
-    <div style="min-width:72px"></div>
+    <div style="min-width:4.5rem"></div>
   </div>
 </div>
 
