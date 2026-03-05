@@ -237,7 +237,7 @@
     <div class="status-label">乗車前</div>
   </div>
   <div class="content">
-    <h1>🚗 乗車記録 <span style="font-size:0.75rem;color:var(--text2);font-weight:400;">03/05-A</span></h1>
+    <h1>🚗 乗車記録 <span id="app-version" style="font-size:0.75rem;color:var(--text2);font-weight:400;"></span></h1>
     <p class="sub">出発時のメーターを撮影します</p>
 
     <div class="card">
@@ -337,6 +337,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
+const _VERSION  = 'v0.1';
 const GAS_URL   = 'https://script.google.com/macros/s/AKfycbzSPja787LxEq4DyC74h62l0Zyac-wi8ZVQEdJIUnF6qTwYUh_ohODj0CkxbulH-L9h/exec';
 const TOKEN_KEY = 'smartcar_token';
 
@@ -539,6 +540,7 @@ function startLocationAcquisition() {
 
 // ---- 初期化 ----
 async function init() {
+  document.getElementById('app-version').textContent = _VERSION;
   document.getElementById('screen-loading').style.display = 'flex';
   if (!getToken()) { show('setup'); return; }
   try {
