@@ -260,13 +260,9 @@
       <div style="font-size:0.75rem;color:var(--text2);text-align:center;margin-bottom:0.625rem;">業務目的を選んで記録開始</div>
       <div class="purpose-grid">
         <button class="purpose-btn" onclick="selectAndSubmit(this,'現場移動')">現場移動</button>
-        <button class="purpose-btn" onclick="selectAndSubmit(this,'前日乗り込み')">前日乗り込み</button>
-        <button class="purpose-btn" onclick="showOtherInput()">その他</button>
+        <button class="purpose-btn" onclick="selectAndSubmit(this,'出張移動')">出張移動</button>
+        <button class="purpose-btn" onclick="selectAndSubmit(this,'その他')">その他</button>
       </div>
-    </div>
-    <div id="other-area" style="display:none;">
-      <input type="text" id="other-input" placeholder="業務目的を入力" style="margin-bottom:0.5rem;" />
-      <button class="btn btn-blue" onclick="submitStart()">記録開始</button>
     </div>
   </div>
 </div>
@@ -608,11 +604,6 @@ async function selectAndSubmit(btn, purpose) {
   }
 }
 
-function showOtherInput() {
-  document.getElementById('purpose-btns').style.display = 'none';
-  document.getElementById('other-area').style.display = 'block';
-  document.getElementById('other-input').focus();
-}
 
 function handlePhoto(input, previewId) {
   const file = input.files[0];
@@ -702,19 +693,6 @@ async function doSubmitStart(purpose) {
   showResult('乗車記録完了', '降車時にアプリを開いてください');
 }
 
-async function submitStart() {
-  const purpose = document.getElementById('other-input').value.trim();
-  if (!purpose) { toast('目的を入力してください'); return; }
-  if (!photoBase64Start) { toast('写真を撮影してください'); return; }
-  const btn = document.querySelector('#other-area .btn-blue');
-  btn.disabled = true; btn.textContent = '送信中...';
-  try {
-    await doSubmitStart(purpose);
-  } catch(e) {
-    toast('エラー: ' + e.message);
-    btn.disabled = false; btn.textContent = '記録開始';
-  }
-}
 
 // ---- 降車画面 ----
 function buildTripInfo() {
