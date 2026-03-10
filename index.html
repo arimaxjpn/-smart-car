@@ -149,16 +149,6 @@
     .info-key { color: var(--text2); }
     .info-val { font-weight: 500; text-align: right; max-width: 65%; font-size: 0.8125rem; }
 
-    /* ---- 結果 ---- */
-    #screen-result {
-      display: none; align-items: center; justify-content: center;
-      flex-direction: column; gap: 1.125rem; min-height: 100svh;
-      padding: 2.5rem; text-align: center;
-    }
-    #screen-result.active { display: flex; }
-    .result-icon  { font-size: 4.25rem; }
-    .result-title { font-size: 1.5rem; font-weight: 700; }
-    .result-sub   { color: var(--text2); font-size: 0.9375rem; }
 
     /* ---- カメラモーダル ---- */
     #cam-modal {
@@ -296,13 +286,6 @@
   </div>
 </div>
 
-<!-- 結果 -->
-<div id="screen-result">
-  <div class="result-icon">✅</div>
-  <div class="result-title" id="result-title"></div>
-  <div class="result-sub"   id="result-sub"></div>
-  <button class="btn btn-gray" onclick="restart()" style="margin-top:0.75rem; width:auto; padding:0.875rem 2.5rem;">完了</button>
-</div>
 
 <!-- カメラモーダル -->
 <div id="cam-modal">
@@ -687,7 +670,8 @@ async function doSubmitStart(purpose) {
   });
   const json = await res.json();
   if (!json.success) throw new Error(json.error);
-  showResult('乗車記録完了', '降車時にアプリを開いてください');
+  toast('乗車記録完了');
+  setTimeout(init, 2000);
 }
 
 
@@ -725,25 +709,14 @@ async function submitEnd() {
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     stopStopWatch();
-    showResult('降車記録完了', '記録しました');
+    toast('降車記録完了');
+    setTimeout(init, 2000);
   } catch(e) {
     toast('エラー: ' + e.message);
     btn.disabled = false; btn.textContent = '降車記録';
   }
 }
 
-// ---- 結果 ----
-function showResult(title, sub) {
-  document.getElementById('result-title').textContent = title;
-  document.getElementById('result-sub').textContent   = sub;
-  document.getElementById('screen-result').style.display = 'flex';
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-}
-
-function restart() {
-  document.getElementById('screen-result').style.display = 'none';
-  init();
-}
 
 // ---- 起動 ----
 init();
