@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
@@ -238,18 +238,14 @@
   </div>
   <div class="content">
     <h1>🚗 乗車記録 <span id="app-version" style="font-size:0.75rem;color:var(--text2);font-weight:400;"></span></h1>
-    <p class="sub">出発時のメーターを撮影します</p>
 
     <div class="card">
       <div id="start-info"></div>
     </div>
 
     <div class="card card-expand">
-      <div class="card-label">メーター写真</div>
       <div class="photo-tap" id="photo-tap-start" onclick="openCamera('start')">
         <span class="photo-icon">📷</span>
-        <span>タップして撮影</span>
-        <span style="font-size:0.6875rem;margin-top:0.125rem;">ダッシュボード全体を枠に合わせて</span>
       </div>
       <div id="photo-wrap-start" style="position:relative; display:none; margin-top:0.625rem;">
         <img id="photo-preview-start" style="width:100%; border-radius:0.75rem;" />
@@ -282,20 +278,15 @@
     <div class="status-label">走行中</div>
   </div>
   <div class="content">
-    <h1>🏁 降車記録</h1>
-    <p class="sub">到着時のメーターを撮影します</p>
+    <h1>🏁 降車記録 <span id="app-version-end" style="font-size:0.75rem;color:var(--text2);font-weight:400;"></span></h1>
 
     <div class="card">
-      <div class="card-label">乗車情報</div>
       <div id="trip-info"></div>
     </div>
 
     <div class="card card-expand">
-      <div class="card-label">メーター写真</div>
       <div class="photo-tap" id="photo-tap-end" onclick="openCamera('end')">
         <span class="photo-icon">📷</span>
-        <span>タップして撮影</span>
-        <span style="font-size:0.6875rem;margin-top:0.125rem;">ダッシュボード全体を枠に合わせて</span>
       </div>
       <div id="photo-wrap-end" style="position:relative; display:none; margin-top:0.625rem;">
         <img id="photo-preview-end" style="width:100%; border-radius:0.75rem;" />
@@ -337,7 +328,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const _VERSION  = 'v0.1';
+const _VERSION  = 'v0.2';
 const GAS_URL   = 'https://script.google.com/macros/s/AKfycbzSPja787LxEq4DyC74h62l0Zyac-wi8ZVQEdJIUnF6qTwYUh_ohODj0CkxbulH-L9h/exec';
 const TOKEN_KEY = 'smartcar_token';
 
@@ -541,6 +532,7 @@ function startLocationAcquisition() {
 // ---- 初期化 ----
 async function init() {
   document.getElementById('app-version').textContent = _VERSION;
+  document.getElementById('app-version-end').textContent = _VERSION;
   document.getElementById('screen-loading').style.display = 'flex';
   if (!getToken()) { show('setup'); return; }
   try {
@@ -576,12 +568,12 @@ function buildStartInfo() {
   const now = new Date();
   const timeStr = now.toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
   document.getElementById('start-info').innerHTML =
-    '<div class="info-row"><span class="info-key">現在時刻</span><span class="info-val">' + timeStr + '</span></div>' +
-    '<div class="info-row"><span class="info-key">現在地</span><span class="info-val" id="start-address">取得中...</span></div>';
+    '<span style="font-size:1rem;font-weight:500;">' + timeStr + '</span>' +
+    '　<span id="start-address" style="font-size:0.9375rem;color:var(--text2);">取得中...</span>';
   if (locationPromise) {
     locationPromise.then(loc => {
       const el = document.getElementById('start-address');
-      if (el) el.textContent = loc.address || '取得できませんでした';
+      if (el) el.textContent = loc.address || '';
     });
   }
 }
@@ -671,18 +663,25 @@ async function getAddress(lat, lon) {
       { headers: { 'Accept-Language': 'ja' } }
     );
     const json = await res.json();
-    const a = json.address || {};
-    const parts = [
-      a.state,
-      a.city || a.town || a.village || a.county,
-      a.suburb || a.neighbourhood || a.quarter,
-      a.road,
-      a.house_number
-    ].filter(Boolean);
-    return parts.join('');
+    return formatAddress(json.address || {});
   } catch(e) {
     return '';
   }
+}
+
+function formatAddress(address) {
+  const locality = address.city || address.town || address.village || address.county || '';
+  const district = address.city_district || address.suburb || address.neighbourhood || address.quarter || '';
+  const road = address.road || '';
+  const roadMatch = road.match(/.+?[0-9]+\u4e01\u76ee/u);
+  const roadShort = roadMatch ? roadMatch[0] : '';
+  const parts = [locality];
+
+  [district, roadShort].forEach(part => {
+    if (part && !parts.includes(part)) parts.push(part);
+  });
+
+  return parts.join('');
 }
 
 async function doSubmitStart(purpose) {
@@ -722,13 +721,10 @@ function buildTripInfo() {
   const t = currentTrip;
   const startTime = t.startDatetime
     ? new Date(t.startDatetime).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
-    : '不明';
-  const addressRow = t.startAddress
-    ? '<div class="info-row"><span class="info-key">乗車地</span><span class="info-val">' + t.startAddress + '</span></div>'
     : '';
+  const address = t.startAddress ? '　<span style="color:var(--text2);">' + t.startAddress + '</span>' : '';
   document.getElementById('trip-info').innerHTML =
-    '<div class="info-row"><span class="info-key">乗車時刻</span><span class="info-val">' + startTime + '</span></div>' +
-    addressRow;
+    '<span style="font-size:1rem;font-weight:500;">' + startTime + '</span>' + address;
 }
 
 async function submitEnd() {
@@ -779,3 +775,4 @@ init();
 </script>
 </body>
 </html>
+
