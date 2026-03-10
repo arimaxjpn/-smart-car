@@ -64,7 +64,6 @@
     .btn:disabled { opacity: 0.4; }
     .btn-blue  { background: var(--accent); color: #fff; }
     .btn-red   { background: var(--red);    color: #fff; }
-    .btn-gray  { background: var(--bg3); color: var(--text2); border: 1px solid var(--border2); }
 
     /* ---- ローディング ---- */
     #screen-loading {
@@ -117,8 +116,6 @@
       transition: all .15s; -webkit-appearance: none;
     }
     .purpose-btn.selected { background: #2560dd1a; border-color: var(--accent); color: var(--accent); }
-    .purpose-btn.full { grid-column: 1 / -1; }
-    #other-input { margin-top: 0.625rem; }
 
     /* ---- 写真 ---- */
     .photo-tap {
@@ -139,16 +136,6 @@
       cursor: pointer; -webkit-appearance: none;
     }
     input[type="file"] { display: none; }
-
-    /* ---- 乗車情報 ---- */
-    .info-row {
-      display: flex; justify-content: space-between; align-items: baseline;
-      padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.875rem;
-    }
-    .info-row:last-child { border-bottom: none; }
-    .info-key { color: var(--text2); }
-    .info-val { font-weight: 500; text-align: right; max-width: 65%; font-size: 0.8125rem; }
-
 
     /* ---- カメラモーダル ---- */
     #cam-modal {
@@ -310,8 +297,7 @@ const _VERSION  = 'v1.0';
 const GAS_URL   = 'https://script.google.com/macros/s/AKfycbzSPja787LxEq4DyC74h62l0Zyac-wi8ZVQEdJIUnF6qTwYUh_ohODj0CkxbulH-L9h/exec';
 const TOKEN_KEY = 'smartcar_token';
 
-let currentTrip     = null;
-let selectedPurpose = '';
+let currentTrip      = null;
 let photoBase64Start = '';
 let photoBase64End   = '';
 let locationPromise  = null;
@@ -471,12 +457,7 @@ window.addEventListener('resize', () => {
 function show(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById('screen-' + id);
-  if (id === 'result') {
-    el.style.display = 'flex';
-    el.classList.add('active');
-  } else if (el) {
-    el.classList.add('active');
-  }
+  if (el) el.classList.add('active');
   document.getElementById('screen-loading').style.display = 'none';
 }
 
@@ -571,7 +552,6 @@ function resetStart() {
 
 async function selectAndSubmit(btn, purpose) {
   if (!photoBase64Start) { toast('写真を撮影してください'); return; }
-  selectedPurpose = purpose;
   document.querySelectorAll('#purpose-btns .purpose-btn').forEach(b => b.disabled = true);
   const origText = btn.textContent;
   btn.textContent = '送信中...';
@@ -583,7 +563,6 @@ async function selectAndSubmit(btn, purpose) {
     btn.textContent = origText;
   }
 }
-
 
 function handlePhoto(input, previewId) {
   const file = input.files[0];
@@ -674,7 +653,6 @@ async function doSubmitStart(purpose) {
   setTimeout(init, 2000);
 }
 
-
 // ---- 降車画面 ----
 function buildTripInfo() {
   const t = currentTrip;
@@ -716,7 +694,6 @@ async function submitEnd() {
     btn.disabled = false; btn.textContent = '降車記録';
   }
 }
-
 
 // ---- 起動 ----
 init();
