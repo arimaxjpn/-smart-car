@@ -385,7 +385,7 @@ function playArrivalAlarm() {
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.8, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
       osc.start(audioCtx.currentTime);
       osc.stop(audioCtx.currentTime + 0.4);
