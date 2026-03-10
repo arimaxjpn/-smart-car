@@ -578,8 +578,6 @@ function resetStart() {
   photoBase64Start = '';
   document.querySelectorAll('.purpose-btn').forEach(b => { b.classList.remove('selected'); b.disabled = false; });
   document.getElementById('purpose-btns').style.display = 'block';
-  document.getElementById('other-area').style.display = 'none';
-  document.getElementById('other-input').value = '';
   const prev = document.getElementById('photo-preview-start');
   prev.src = '';
   document.getElementById('photo-wrap-start').style.display = 'none';
