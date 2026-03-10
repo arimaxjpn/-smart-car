@@ -235,9 +235,9 @@
   <div class="btn-area">
     <div id="purpose-btns">
       <div class="purpose-grid">
-        <button class="purpose-btn" onclick="selectAndSubmit(this,'現場移動')">現場移動</button>
-        <button class="purpose-btn" onclick="selectAndSubmit(this,'出張移動')">出張移動</button>
-        <button class="purpose-btn" onclick="selectAndSubmit(this,'その他')">その他</button>
+        <button class="purpose-btn" data-label="現場移動" onclick="selectAndSubmit(this,'現場移動')">現場移動</button>
+        <button class="purpose-btn" data-label="出張移動" onclick="selectAndSubmit(this,'出張移動')">出張移動</button>
+        <button class="purpose-btn" data-label="その他" onclick="selectAndSubmit(this,'その他')">その他</button>
       </div>
     </div>
   </div>
@@ -293,7 +293,7 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const _VERSION  = 'v1.0';
+const _VERSION  = 'v1.1';
 const GAS_URL   = 'https://script.google.com/macros/s/AKfycbzSPja787LxEq4DyC74h62l0Zyac-wi8ZVQEdJIUnF6qTwYUh_ohODj0CkxbulH-L9h/exec';
 const TOKEN_KEY = 'smartcar_token';
 
@@ -540,7 +540,11 @@ function buildStartInfo() {
 function resetStart() {
   selectedPurpose  = '';
   photoBase64Start = '';
-  document.querySelectorAll('.purpose-btn').forEach(b => { b.classList.remove('selected'); b.disabled = false; });
+  document.querySelectorAll('.purpose-btn').forEach(b => {
+    b.classList.remove('selected');
+    b.disabled = false;
+    b.textContent = b.dataset.label || b.textContent;
+  });
   document.getElementById('purpose-btns').style.display = 'block';
   const prev = document.getElementById('photo-preview-start');
   prev.src = '';

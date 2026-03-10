@@ -9,19 +9,19 @@
 // 【列構成】
 //   A(1): ID
 //   B(2): 乗車日時
-//   C(3): 乗車地(緯度)
-//   D(4): 乗車地(経度)
-//   E(5): 乗車地(住所)
-//   F(6): 乗車メーター写真URL
-//   G(7): OCR生データ(乗車)
-//   H(8): 開始メーター値
+//   C(3): 乗車緯度
+//   D(4): 乗車経度
+//   E(5): 乗車住所
+//   F(6): 乗車時写真
+//   G(7): 乗車OCR
+//   H(8): 開始値
 //   I(9): 降車日時
-//   J(10): 降車地(緯度)
-//   K(11): 降車地(経度)
-//   L(12): 降車地(住所)
-//   M(13): 降車メーター写真URL
-//   N(14): OCR生データ(降車)
-//   O(15): 終了メーター値
+//   J(10): 降車緯度
+//   K(11): 降車経度
+//   L(12): 降車住所
+//   M(13): 降車時写真
+//   N(14): 降車OCR
+//   O(15): 終了値
 //   P(16): 業務目的
 //   Q(17): 走行距離(km)
 //   R(18): ステータス
@@ -47,6 +47,8 @@ const JOURNAL_SHEET = '運転日誌';
 const LOG_SHEET     = '編集ログ';
 const CONFIG_SHEET  = '設定';
 const FOLDER_NAME   = 'SmartCar_写真';
+const _VERSION      = 'v0.5';
+const REPORT_TRIGGER_SCHEDULE = 'monthly';
 
 // ============================================================
 // エントリーポイント
@@ -174,6 +176,9 @@ function startTrip_(data) {
     '=IF(AND(H' + newRow + '<>"",O' + newRow + '<>""),O' + newRow + '-H' + newRow + ',"")'
   );
 
+  // 新しい行に書式を自動適用
+  formatNewRow_(sheet, newRow);
+
   return jsonResponse_({ success: true, tripId: id });
 }
 
@@ -243,13 +248,8 @@ function savePhotoToDrive_(base64Data, filename) {
 function processOcrBatch() {
   const ss     = SpreadsheetApp.getActiveSpreadsheet();
   const sheet  = ss.getSheetByName(JOURNAL_SHEET);
-  const config = ss.getSheetByName(CONFIG_SHEET);
-  const apiKey = String(config.getRange('B7').getValue()).trim();
-
-  if (!apiKey || apiKey === '（Google AI StudioからコピーしてB7に貼り付け）') {
-    Logger.log('[OCR] Gemini APIキーが設定されていません（設定シート B7）');
-    return;
-  }
+  const apiKey = getGeminiApiKey_();
+  if (!apiKey) return;
 
   const allData = sheet.getDataRange().getValues();
   let processed = 0;
@@ -261,41 +261,94 @@ function processOcrBatch() {
     const endPhotoUrl   = String(row[12] || '');  // M(13): 降車メーター写真URL
     const startMeter    = row[7];                  // H(8) : 開始メーター値
     const endMeter      = row[14];                 // O(15): 終了メーター値
+    const startOcrRaw   = row[6]  || '';           // G(7) : 乗車OCR生データ
+    const endOcrRaw     = row[13] || '';           // N(14): 降車OCR生データ
 
-    // 乗車写真あり・H列空 → OCR
-    if (startPhotoUrl && startMeter === '') {
+    if (isOcrPending_(startPhotoUrl, startMeter, startOcrRaw)) {
       Logger.log('[OCR] 行' + rowNum + ' 乗車写真を処理中...');
-      const result = ocrPhotoFromDrive_(startPhotoUrl, apiKey);
-      // G列: 数値が取れた場合は数値として保存（カンマ書式が効く）、失敗時はテキスト
-      sheet.getRange(rowNum, 7).setValue(result.value !== null ? result.value : result.rawText);
-      if (result.value !== null) {
-        sheet.getRange(rowNum, 8).setValue(result.value);  // H(8): 開始メーター値
-        Logger.log('[OCR] 行' + rowNum + ' 乗車メーター = ' + result.value);
-      } else {
-        Logger.log('[OCR] 行' + rowNum + ' 乗車メーター 読取不可: ' + result.rawText);
-      }
+      runOcrForRow_(sheet, rowNum, startPhotoUrl, 'start', apiKey);
       processed++;
       Utilities.sleep(600);
     }
 
-    // 降車写真あり・O列空 → OCR
-    if (endPhotoUrl && endMeter === '') {
+    if (isOcrPending_(endPhotoUrl, endMeter, endOcrRaw)) {
       Logger.log('[OCR] 行' + rowNum + ' 降車写真を処理中...');
-      const result = ocrPhotoFromDrive_(endPhotoUrl, apiKey);
-      // N列: 数値が取れた場合は数値として保存
-      sheet.getRange(rowNum, 14).setValue(result.value !== null ? result.value : result.rawText);
-      if (result.value !== null) {
-        sheet.getRange(rowNum, 15).setValue(result.value);  // O(15): 終了メーター値
-        Logger.log('[OCR] 行' + rowNum + ' 降車メーター = ' + result.value);
-      } else {
-        Logger.log('[OCR] 行' + rowNum + ' 降車メーター 読取不可: ' + result.rawText);
-      }
+      runOcrForRow_(sheet, rowNum, endPhotoUrl, 'end', apiKey);
       processed++;
       Utilities.sleep(600);
     }
   }
 
   Logger.log('[OCR] 処理完了: ' + processed + '件');
+}
+
+function forceReprocessOcr() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(JOURNAL_SHEET);
+  const data = sheet.getDataRange().getValues();
+  const apiKey = getGeminiApiKey_();
+  if (!apiKey) return;
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const startPhotoUrl = String(row[5] || '');
+    const startMeter = row[7];
+    const endPhotoUrl = String(row[12] || '');
+    const endMeter = row[14];
+    const rowNum = i + 1;
+
+    if (String(startPhotoUrl).trim() !== '' && parseNumberOrNull_(startMeter) === null) {
+      Logger.log('[OCR] 強制再実行(乗車): 行' + rowNum);
+      runOcrForRow_(sheet, rowNum, startPhotoUrl, 'start', apiKey);
+      Utilities.sleep(600);
+    }
+    if (String(endPhotoUrl).trim() !== '' && parseNumberOrNull_(endMeter) === null) {
+      Logger.log('[OCR] 強制再実行(降車): 行' + rowNum);
+      runOcrForRow_(sheet, rowNum, endPhotoUrl, 'end', apiKey);
+      Utilities.sleep(600);
+    }
+  }
+
+  Logger.log('[OCR] forceReprocessOcr complete');
+}
+
+function getGeminiApiKey_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const config = ss.getSheetByName(CONFIG_SHEET);
+  const apiKey = String(config.getRange('B7').getValue()).trim();
+
+  if (!apiKey || apiKey === '（Google AI StudioからコピーしてB7に貼り付け）') {
+    Logger.log('[OCR] Gemini APIキーが設定されていません（設定シート B7）');
+    return '';
+  }
+
+  return apiKey;
+}
+
+function isOcrPending_(photoUrl, meterValue, ocrRawText) {
+  if (String(photoUrl || '').trim() === '') return false;
+  if (parseNumberOrNull_(meterValue) !== null) return false;
+
+  const raw = String(ocrRawText || '').trim();
+  return raw === '' || raw.startsWith('OCRエラー') || raw.startsWith('ERROR');
+}
+
+function runOcrForRow_(sheet, rowNum, photoUrl, kind, apiKey) {
+  const isStart = kind === 'start';
+  const rawCol = isStart ? 7 : 14;
+  const meterCol = isStart ? 8 : 15;
+  const label = isStart ? '乗車' : '降車';
+  const result = ocrPhotoFromDrive_(photoUrl, apiKey);
+
+  sheet.getRange(rowNum, rawCol).setValue(result.value !== null ? result.value : result.rawText);
+  if (result.value !== null) {
+    sheet.getRange(rowNum, meterCol).setValue(result.value);
+    Logger.log('[OCR] 行' + rowNum + ' ' + label + 'メーター = ' + result.value);
+  } else {
+    Logger.log('[OCR] 行' + rowNum + ' ' + label + 'メーター 読取不可: ' + result.rawText);
+  }
+
+  return result;
 }
 
 // ============================================================
@@ -306,7 +359,7 @@ function ocrPhotoFromDrive_(driveUrl, apiKey) {
   try {
     const match = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
     if (!match) {
-      return { rawText: 'URLからファイルIDを取得できませんでした: ' + driveUrl, value: null };
+      return { rawText: formatOcrError_('URLからファイルIDを取得できませんでした: ' + driveUrl), value: null };
     }
 
     const fileId = match[1];
@@ -316,7 +369,7 @@ function ocrPhotoFromDrive_(driveUrl, apiKey) {
 
     return ocrImageGemini_(base64, apiKey);
   } catch(e) {
-    return { rawText: 'エラー: ' + e.message, value: null };
+    return { rawText: formatOcrError_(e.message), value: null };
   }
 }
 
@@ -359,14 +412,14 @@ function ocrImageGemini_(base64Data, apiKey) {
                      json.candidates[0].content.parts[0] &&
                      json.candidates[0].content.parts[0].text)
                     ? json.candidates[0].content.parts[0].text.trim()
-                    : 'レスポンス解析エラー: ' + response.getContentText().substring(0, 200);
+                    : formatOcrError_('レスポンス解析エラー: ' + response.getContentText().substring(0, 200));
 
     const cleaned = rawText.replace(/[,，\s　km]/g, '');
     const value   = /^\d+$/.test(cleaned) ? Number(cleaned) : null;
 
     return { rawText, value };
   } catch(e) {
-    return { rawText: 'API呼び出しエラー: ' + e.message, value: null };
+    return { rawText: formatOcrError_('API呼び出しエラー: ' + e.message), value: null };
   }
 }
 
@@ -449,15 +502,11 @@ function generateMonthlyPDF_(year, month) {
   const config  = ss.getSheetByName(CONFIG_SHEET);
   const allData = sheet.getDataRange().getValues();
 
-  const monthData = allData.slice(1).filter(row => {
-    if (!row[1]) return false;
-    const d = new Date(row[1]);
-    return d.getFullYear() === year
-        && (d.getMonth() + 1) === month
-        && row[17] === 'closed';  // R(18)
-  });
+  const reportData = collectMonthlyReportData_(allData.slice(1), year, month);
+  const validRows = reportData.validRows;
+  const reviewRows = reportData.reviewRows;
 
-  if (monthData.length === 0) {
+  if (validRows.length === 0 && reviewRows.length === 0) {
     return jsonResponse_({ success: false, error: year + '年' + month + '月のデータがありません' });
   }
 
@@ -465,61 +514,51 @@ function generateMonthlyPDF_(year, month) {
   const vehicleInfo = config.getRange('B3').getValue();
   const unitPrice   = Number(config.getRange('B4').getValue());
 
-  const totalDistance = monthData.reduce((sum, row) => sum + Number(row[16] || 0), 0);  // Q(17)
+  const totalDistance = validRows.reduce((sum, item) => sum + item.distance, 0);
   const totalAmount   = totalDistance * unitPrice;
-
-  const docTitle = '運転日誌_' + year + '年' + month + '月_' + driverName;
+  const periodLabel = Utilities.formatString('%04d-%02d', year, month);
+  const fileName = periodLabel + '_運転日報.pdf';
+  const docTitle = periodLabel + '_運転日報';
   const doc      = DocumentApp.create(docTitle);
   const body     = doc.getBody();
 
-  body.appendParagraph('業務用車両運転日誌')
+  body.appendParagraph('業務用車両 月報')
       .setHeading(DocumentApp.ParagraphHeading.HEADING1)
       .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
 
   body.appendParagraph(
     year + '年' + month + '月分　運転者：' + driverName + '　車両：' + vehicleInfo
   ).setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  body.appendParagraph('判定基準: closed レコード / 降車日時ベース / 画像は月報に含めない')
+      .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
 
   body.appendParagraph('');
 
-  const headers = ['日付', '乗車地', '降車地', '開始(km)', '終了(km)', '距離(km)', '業務目的'];
-  const table   = body.appendTable();
-  const headerRow = table.appendTableRow();
-  headers.forEach(h => {
-    const cell = headerRow.appendTableCell(h);
-    cell.setBackgroundColor('#4a86e8');
-    cell.editAsText().setForegroundColor('#ffffff').setBold(true);
-  });
+  appendMonthlyReportTable_(body, '月報対象一覧', validRows, false);
 
-  monthData.forEach(row => {
-    const d       = new Date(row[1]);
-    const dateStr = (d.getMonth() + 1) + '/' + d.getDate();
-    const tr      = table.appendTableRow();
-    [
-      dateStr,
-      row[4]  || (row[2]  + ', ' + row[3]),   // E(5): 乗車住所
-      row[11] || (row[9]  + ', ' + row[10]),   // L(12): 降車住所
-      String(row[7]  || ''),                   // H(8) : 開始メーター
-      String(row[14] || ''),                   // O(15): 終了メーター
-      String(row[16] || ''),                   // Q(17): 走行距離
-      String(row[15] || '')                    // P(16): 業務目的
-    ].forEach(val => tr.appendTableCell(val));
-  });
+  if (reviewRows.length > 0) {
+    body.appendParagraph('');
+    appendMonthlyReportTable_(body, '要確認一覧', reviewRows, true);
+    body.appendParagraph('要確認は合計件数・合計走行km・合計金額に含めていません。')
+        .setForegroundColor('#b45f06');
+  }
 
   body.appendParagraph('');
-  body.appendParagraph('合計走行距離：' + totalDistance + ' km')
+  body.appendParagraph('件数：' + validRows.length + '件')
+      .editAsText().setBold(true);
+  body.appendParagraph('合計走行km：' + formatNumberForPdf_(totalDistance) + ' km')
       .editAsText().setBold(true);
   body.appendParagraph(
-    '経費合計：' + totalAmount.toLocaleString('ja-JP') + ' 円'
-    + '（' + unitPrice + '円/km × ' + totalDistance + 'km）'
+    '合計金額：' + formatNumberForPdf_(totalAmount) + ' 円'
+    + '（' + formatNumberForPdf_(unitPrice) + '円/km × ' + formatNumberForPdf_(totalDistance) + 'km）'
   ).editAsText().setBold(true);
 
   doc.saveAndClose();
 
-  const folderId = config.getRange('B5').getValue();
-  const folder   = DriveApp.getFolderById(folderId);
+  const folder   = getMonthlyReportFolder_(config);
   const docFile  = DriveApp.getFileById(doc.getId());
-  const pdfBlob  = docFile.getAs('application/pdf').setName(docTitle + '.pdf');
+  trashExistingFilesByName_(folder, fileName);
+  const pdfBlob  = docFile.getAs('application/pdf').setName(fileName);
   const pdfFile  = folder.createFile(pdfBlob);
 
   docFile.setTrashed(true);
@@ -528,10 +567,215 @@ function generateMonthlyPDF_(year, month) {
   return jsonResponse_({
     success:       true,
     pdfUrl:        pdfFile.getUrl(),
+    folderUrl:     folder.getUrl(),
     totalDistance: totalDistance,
     totalAmount:   totalAmount,
-    recordCount:   monthData.length
+    recordCount:   validRows.length,
+    reviewCount:   reviewRows.length,
+    fileName:      fileName
   });
+}
+
+function collectMonthlyReportData_(rows, year, month) {
+  const validRows = [];
+  const reviewRows = [];
+
+  rows.forEach((row, index) => {
+    if (row[17] !== 'closed' || !row[8]) return;
+
+    const endDate = new Date(row[8]);
+    if (isNaN(endDate.getTime())) return;
+    if (endDate.getFullYear() !== year || (endDate.getMonth() + 1) !== month) return;
+
+    const normalized = normalizeMonthlyRow_(row, index + 2);
+    if (normalized.reviewReason) {
+      reviewRows.push(normalized);
+    } else {
+      validRows.push(normalized);
+    }
+  });
+
+  validRows.sort((a, b) => a.endDate - b.endDate);
+  reviewRows.sort((a, b) => a.endDate - b.endDate);
+
+  return { validRows, reviewRows };
+}
+
+function normalizeMonthlyRow_(row, rowNumber) {
+  const startValue = parseNumberOrNull_(row[7]);
+  const endValue = parseNumberOrNull_(row[14]);
+  const distance = parseNumberOrNull_(row[16]);
+  const computedDistance = startValue !== null && endValue !== null ? endValue - startValue : null;
+  const reviewReasons = [];
+
+  if (!row[8]) reviewReasons.push('降車日時なし');
+  if (startValue === null) reviewReasons.push('開始値未確定');
+  if (endValue === null) reviewReasons.push('終了値未確定');
+  if (distance === null) reviewReasons.push('走行km未確定');
+  if (startValue !== null && endValue !== null && endValue < startValue) reviewReasons.push('終了値が開始値未満');
+  if (distance !== null && distance < 0) reviewReasons.push('走行kmがマイナス');
+  if (distance !== null && distance > 500) reviewReasons.push('走行kmが500km超');
+  if (distance !== null && computedDistance !== null && Math.abs(distance - computedDistance) > 0.001) {
+    reviewReasons.push('走行kmと開始/終了値が不一致');
+  }
+  if (hasPendingOcr_(row[5], row[6], row[7])) reviewReasons.push('乗車OCR未確定');
+  if (hasPendingOcr_(row[12], row[13], row[14])) reviewReasons.push('降車OCR未確定');
+
+  return {
+    rowNumber: rowNumber,
+    endDate: new Date(row[8]),
+    dateLabel: formatDateForPdf_(row[8]),
+    startAddress: shortenAddressForPdf_(buildAddressLabel_(row[4], row[2], row[3])),
+    endAddress: shortenAddressForPdf_(buildAddressLabel_(row[11], row[9], row[10])),
+    startValue: startValue,
+    endValue: endValue,
+    distance: distance,
+    purpose: String(row[15] || ''),
+    reviewReason: reviewReasons.join(' / ')
+  };
+}
+
+function appendMonthlyReportTable_(body, title, rows, includeReason) {
+  body.appendParagraph(title)
+      .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+
+  const headers = ['日付', '乗車住所', '降車住所', '開始', '終了', '距離', '目的'];
+  if (includeReason) headers.push('要確認');
+
+  const table = body.appendTable();
+  const headerRow = table.appendTableRow();
+  headers.forEach(h => {
+    const cell = headerRow.appendTableCell(h);
+    cell.setBackgroundColor(includeReason ? '#b45f06' : '#4a86e8');
+    cell.editAsText()
+      .setForegroundColor('#ffffff')
+      .setBold(true)
+      .setFontFamily('Arial')
+      .setFontSize(9);
+    cell.getChild(0).asParagraph().setAlignment(DocumentApp.HorizontalAlignment.CENTER);
+  });
+  setMonthlyReportColumnWidths_(table, includeReason);
+
+  if (rows.length === 0) {
+    const emptyRow = table.appendTableRow();
+    appendBodyTableCell_(emptyRow, '対象なし');
+    for (let i = 1; i < headers.length; i++) {
+      appendBodyTableCell_(emptyRow, '');
+    }
+    return;
+  }
+
+  rows.forEach(item => {
+    const tr = table.appendTableRow();
+    appendBodyTableCell_(tr, item.dateLabel, 'CENTER', 9);
+    appendBodyTableCell_(tr, item.startAddress, 'LEFT', 8);
+    appendBodyTableCell_(tr, item.endAddress, 'LEFT', 8);
+    appendBodyTableCell_(tr, formatMeterForPdf_(item.startValue), 'RIGHT', 8);
+    appendBodyTableCell_(tr, formatMeterForPdf_(item.endValue), 'RIGHT', 8);
+    appendBodyTableCell_(tr, formatNumberForPdf_(item.distance), 'RIGHT', 9);
+    appendBodyTableCell_(tr, item.purpose, 'LEFT', 9);
+
+    if (includeReason) {
+      appendBodyTableCell_(tr, item.reviewReason, 'LEFT', 8);
+    }
+  });
+}
+
+function setMonthlyReportColumnWidths_(table, includeReason) {
+  const widths = includeReason
+    ? [40, 98, 98, 40, 40, 40, 60, 120]
+    : [40, 108, 108, 40, 40, 40, 60];
+
+  widths.forEach((width, index) => {
+    table.setColumnWidth(index, width);
+  });
+}
+
+function appendBodyTableCell_(row, value, alignment, fontSize) {
+  const text = String(value || '');
+  const cell = row.appendTableCell(text);
+  const cellText = cell.editAsText()
+    .setForegroundColor('#202124')
+    .setFontSize(fontSize || 10)
+    .setBold(false);
+  const paragraph = cell.getChild(0).asParagraph();
+  paragraph.setAlignment(DocumentApp.HorizontalAlignment[alignment || 'LEFT']);
+  cellText.setFontFamily('Arial');
+  return cell;
+}
+
+function shortenAddressForPdf_(address) {
+  const text = String(address || '')
+    .replace(/\r?\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^神奈川県/, '')
+    .trim();
+
+  if (text.length <= 18) return text;
+  return text.substring(0, 18) + '…';
+}
+
+function hasPendingOcr_(photoUrl, ocrRaw, meterValue) {
+  return isOcrPending_(photoUrl, meterValue, ocrRaw);
+}
+
+function formatOcrError_(message) {
+  return 'OCRエラー: ' + String(message || '').trim();
+}
+
+function parseNumberOrNull_(value) {
+  if (value === '' || value === null || typeof value === 'undefined') return null;
+  if (typeof value === 'number') return isNaN(value) ? null : value;
+
+  const normalized = String(value).replace(/[,，\s　]/g, '');
+  if (!normalized) return null;
+  const num = Number(normalized);
+  return isNaN(num) ? null : num;
+}
+
+function buildAddressLabel_(address, lat, lon) {
+  const text = String(address || '').trim();
+  if (text) return text;
+
+  const latNum = parseNumberOrNull_(lat);
+  const lonNum = parseNumberOrNull_(lon);
+  if (latNum === null || lonNum === null) return '';
+
+  return latNum.toFixed(5) + ', ' + lonNum.toFixed(5);
+}
+
+function formatDateForPdf_(value) {
+  const date = new Date(value);
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'M/d');
+}
+
+function formatNumberForPdf_(value) {
+  if (value === null || value === '' || typeof value === 'undefined') return '';
+  return Number(value).toLocaleString('ja-JP');
+}
+
+function formatMeterForPdf_(value) {
+  if (value === null || value === '' || typeof value === 'undefined') return '';
+  return String(Math.round(Number(value)));
+}
+
+function getMonthlyReportFolder_(configSheet) {
+  const folderId = configSheet.getRange('B5').getValue();
+  if (!folderId || folderId === '（自動設定）') {
+    throw new Error('DriveフォルダIDが設定されていません。setupSheets() を実行してください。');
+  }
+
+  const rootFolder = DriveApp.getFolderById(folderId);
+  const folderName = '月報PDF';
+  const folders = rootFolder.getFoldersByName(folderName);
+  return folders.hasNext() ? folders.next() : rootFolder.createFolder(folderName);
+}
+
+function trashExistingFilesByName_(folder, fileName) {
+  const files = folder.getFilesByName(fileName);
+  while (files.hasNext()) {
+    files.next().setTrashed(true);
+  }
 }
 
 // ============================================================
@@ -543,7 +787,42 @@ function monthlyAutoReport() {
   let   month = now.getMonth();
   let   year  = now.getFullYear();
   if (month === 0) { month = 12; year--; }
-  generateMonthlyPDF_(year, month);
+  createMonthlyPack(year, month);  // PDF＋データ＋写真を一括アーカイブ
+}
+
+function ensureReportTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+
+  triggers.forEach(trigger => {
+    if (trigger.getHandlerFunction() === 'monthlyAutoReport') {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+
+  const builder = ScriptApp.newTrigger('monthlyAutoReport').timeBased().atHour(9);
+  if (REPORT_TRIGGER_SCHEDULE === 'daily') {
+    builder.everyDays(1).create();
+    return;
+  }
+
+  builder.onMonthDay(1).create();
+}
+
+function refreshReportTrigger() {
+  ensureReportTrigger_();
+  SpreadsheetApp.getUi().alert(
+    '月報トリガーを更新しました。現在の設定: ' +
+    (REPORT_TRIGGER_SCHEDULE === 'daily' ? '毎日 9:00' : '毎月1日 9:00')
+  );
+}
+
+function runMonthlyReportForCurrentMonth() {
+  const now = new Date();
+  generateMonthlyPDF_(now.getFullYear(), now.getMonth() + 1);
+}
+
+function runMonthlyReportForMarch2026() {
+  generateMonthlyPDF_(2026, 3);
 }
 
 // ============================================================
@@ -557,11 +836,11 @@ function setupSheets() {
   if (!journalSheet) journalSheet = ss.insertSheet(JOURNAL_SHEET);
   journalSheet.clearContents();
   journalSheet.getRange(1, 1, 1, 19).setValues([[
-    'ID', '乗車日時', '乗車地(緯度)', '乗車地(経度)', '乗車地(住所)',
-    '乗車メーター写真URL', 'OCR生データ(乗車)', '開始メーター値',
-    '降車日時', '降車地(緯度)', '降車地(経度)', '降車地(住所)',
-    '降車メーター写真URL', 'OCR生データ(降車)', '終了メーター値',
-    '業務目的', '走行距離(km)', 'ステータス', '作成日時'
+    'ID', '乗車日時', '乗車緯度', '乗車経度', '乗車住所',
+    '乗車時写真', '乗車OCR', '開始値',
+    '降車日時', '降車緯度', '降車経度', '降車住所',
+    '降車時写真', '降車OCR', '終了値',
+    '業務目的', '走行km', 'ステータス', '作成日時'
   ]]);
   journalSheet.setFrozenRows(1);
   journalSheet.getRange(1, 1, 1, 19).setBackground('#e8f0fe').setFontWeight('bold');
@@ -595,12 +874,7 @@ function setupSheets() {
   configSheet.getRange('B5').setValue(folder.getId());
 
   const existingTriggers = ScriptApp.getProjectTriggers();
-
-  const alreadyHasMonthly = existingTriggers.some(t => t.getHandlerFunction() === 'monthlyAutoReport');
-  if (!alreadyHasMonthly) {
-    ScriptApp.newTrigger('monthlyAutoReport')
-      .timeBased().onMonthDay(1).atHour(9).create();
-  }
+  ensureReportTrigger_();
 
   const alreadyHasOcr = existingTriggers.some(t => t.getHandlerFunction() === 'processOcrBatch');
   if (!alreadyHasOcr) {
@@ -666,17 +940,37 @@ function migrateColumnOrder() {
 
   // ヘッダー行を更新
   sheet.getRange(1, 1, 1, 19).setValues([[
-    'ID', '乗車日時', '乗車地(緯度)', '乗車地(経度)', '乗車地(住所)',
-    '乗車メーター写真URL', 'OCR生データ(乗車)', '開始メーター値',
-    '降車日時', '降車地(緯度)', '降車地(経度)', '降車地(住所)',
-    '降車メーター写真URL', 'OCR生データ(降車)', '終了メーター値',
-    '業務目的', '走行距離(km)', 'ステータス', '作成日時'
+    'ID', '乗車日時', '乗車緯度', '乗車経度', '乗車住所',
+    '乗車時写真', '乗車OCR', '開始値',
+    '降車日時', '降車緯度', '降車経度', '降車住所',
+    '降車時写真', '降車OCR', '終了値',
+    '業務目的', '走行km', 'ステータス', '作成日時'
   ]]);
 
   SpreadsheetApp.getUi().alert(
     '✅ 列の並び替え完了！（' + numRows + '行を変換）\n\n' +
     '次に applyJournalFormat を実行してください。'
   );
+}
+
+// ============================================================
+// ヘッダー名だけを現在の表記に更新
+// データ本体や列順は変更しない
+// ============================================================
+
+function updateJournalHeaders() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(JOURNAL_SHEET);
+  if (!sheet) throw new Error('運転日誌シートが見つかりません。');
+
+  sheet.getRange(1, 1, 1, 19).setValues([[
+    'ID', '乗車日時', '乗車緯度', '乗車経度', '乗車住所',
+    '乗車時写真', '乗車OCR', '開始値',
+    '降車日時', '降車緯度', '降車経度', '降車住所',
+    '降車時写真', '降車OCR', '終了値',
+    '業務目的', '走行km', 'ステータス', '作成日時'
+  ]]);
+
+  SpreadsheetApp.getUi().alert('ヘッダー名を更新しました。');
 }
 
 // ============================================================
@@ -695,6 +989,73 @@ function listGeminiModels() {
     json.models.forEach(m => Logger.log(m.name + ' | ' + (m.displayName || '')));
   } else {
     Logger.log('エラー: ' + res.getContentText().substring(0, 500));
+  }
+}
+
+// ============================================================
+// 新規行に書式を適用（startTrip_ から自動呼び出し）
+// ============================================================
+
+function formatNewRow_(sheet, rowNum) {
+  const ss      = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetId = sheet.getSheetId();
+
+  // 垂直整列・折り返しリセット
+  sheet.getRange(rowNum, 1, 1, 19).setVerticalAlignment('middle').setWrap(false);
+
+  // 折り返しは住所列・業務目的列のみ ON
+  sheet.getRange(rowNum, 5,  1, 1).setWrap(true);  // E: 乗車住所
+  sheet.getRange(rowNum, 12, 1, 1).setWrap(true);  // L: 降車住所
+  sheet.getRange(rowNum, 16, 1, 1).setWrap(true);  // P: 業務目的
+
+  // 数値フォーマット
+  sheet.getRange(rowNum, 2,  1, 1).setNumberFormat('yyyy/MM/dd HH:mm'); // B: 乗車日時
+  sheet.getRange(rowNum, 9,  1, 1).setNumberFormat('yyyy/MM/dd HH:mm'); // I: 降車日時
+  sheet.getRange(rowNum, 3,  1, 2).setNumberFormat('0.00');             // C:D: 緯度経度
+  sheet.getRange(rowNum, 10, 1, 2).setNumberFormat('0.00');             // J:K: 緯度経度
+  sheet.getRange(rowNum, 8,  1, 1).setNumberFormat('#,##0');            // H: 開始値
+  sheet.getRange(rowNum, 15, 1, 1).setNumberFormat('#,##0');            // O: 終了値
+  sheet.getRange(rowNum, 17, 1, 1).setNumberFormat('#,##0');            // Q: 走行km
+
+  // 水平整列
+  sheet.getRange(rowNum, 1,  1, 1).setHorizontalAlignment('center');   // A
+  sheet.getRange(rowNum, 2,  1, 1).setHorizontalAlignment('center');   // B
+  sheet.getRange(rowNum, 3,  1, 2).setHorizontalAlignment('right');    // C:D
+  sheet.getRange(rowNum, 5,  1, 1).setHorizontalAlignment('left');     // E
+  sheet.getRange(rowNum, 6,  1, 1).setHorizontalAlignment('left');     // F
+  sheet.getRange(rowNum, 7,  1, 1).setHorizontalAlignment('right');    // G
+  sheet.getRange(rowNum, 8,  1, 1).setHorizontalAlignment('right');    // H
+  sheet.getRange(rowNum, 9,  1, 1).setHorizontalAlignment('center');   // I
+  sheet.getRange(rowNum, 10, 1, 2).setHorizontalAlignment('right');    // J:K
+  sheet.getRange(rowNum, 12, 1, 2).setHorizontalAlignment('left');     // L:M
+  sheet.getRange(rowNum, 14, 1, 1).setHorizontalAlignment('right');    // N
+  sheet.getRange(rowNum, 15, 1, 1).setHorizontalAlignment('right');    // O
+  sheet.getRange(rowNum, 16, 1, 1).setHorizontalAlignment('center');   // P
+  sheet.getRange(rowNum, 17, 1, 1).setHorizontalAlignment('right');    // Q
+  sheet.getRange(rowNum, 18, 1, 1).setHorizontalAlignment('center');   // R
+  sheet.getRange(rowNum, 19, 1, 1).setHorizontalAlignment('center');   // S
+
+  // パディング（Sheets Advanced Service）
+  try {
+    Sheets.Spreadsheets.batchUpdate({
+      requests: [{
+        repeatCell: {
+          range: {
+            sheetId:       sheetId,
+            startRowIndex: rowNum - 1,
+            endRowIndex:   rowNum
+          },
+          cell: {
+            userEnteredFormat: {
+              padding: { top: 5, right: 10, bottom: 5, left: 10 }
+            }
+          },
+          fields: 'userEnteredFormat.padding'
+        }
+      }]
+    }, ss.getId());
+  } catch(e) {
+    // Sheets Advanced Service 未設定の場合はスキップ（書式のみ適用済み）
   }
 }
 
@@ -723,48 +1084,128 @@ function applyJournalFormat() {
   const sheet   = ss.getSheetByName(JOURNAL_SHEET);
   const lastRow = sheet.getLastRow();
   const sheetId = sheet.getSheetId();
+  const formatRows = Math.min(Math.max(lastRow, 2), 1000);
+  const dataRows   = formatRows - 1;
 
   // ヘッダー書式
   sheet.setFrozenRows(1);
   sheet.setRowHeight(1, 36);
   sheet.getRange(1, 1, 1, 19)
-    .setBackground('#2c5f8a')
     .setFontColor('#ffffff')
     .setFontWeight('normal')
     .setHorizontalAlignment('center')
     .setVerticalAlignment('middle');
+  sheet.getRange(1, 1, 1, 8).setBackground('#4d7aa2');   // 乗車
+  sheet.getRange(1, 9, 1, 7).setBackground('#6a8f63');   // 降車
+  sheet.getRange(1, 16, 1, 4).setBackground('#9a765b');  // 業務/状態
 
-  // 数値フォーマット（日付・メーター値）
-  const formatRows = Math.min(Math.max(lastRow, 2), 1000);
-  sheet.getRange(2, 2,  formatRows - 1, 1).setNumberFormat('yyyy/MM/dd HH:mm'); // B
-  sheet.getRange(2, 9,  formatRows - 1, 1).setNumberFormat('yyyy/MM/dd HH:mm'); // I
-  sheet.getRange(2, 7,  formatRows - 1, 1).setNumberFormat('#,##0');             // G
-  sheet.getRange(2, 8,  formatRows - 1, 1).setNumberFormat('#,##0');             // H
-  sheet.getRange(2, 14, formatRows - 1, 1).setNumberFormat('#,##0');             // N
-  sheet.getRange(2, 15, formatRows - 1, 1).setNumberFormat('#,##0');             // O
-  sheet.getRange(2, 17, formatRows - 1, 1).setNumberFormat('#,##0');             // Q
+  // 本文書式
+  const bodyRange = sheet.getRange(2, 1, dataRows, 19);
+  bodyRange
+    .setVerticalAlignment('middle')
+    .setWrap(false);
+
+  // 日付・数値フォーマット
+  sheet.getRange(2, 2, dataRows, 1).setNumberFormat('yyyy/MM/dd HH:mm'); // B
+  sheet.getRange(2, 9, dataRows, 1).setNumberFormat('yyyy/MM/dd HH:mm'); // I
+  sheet.getRange(2, 3, dataRows, 2).setNumberFormat('0.00');             // C:D
+  sheet.getRange(2, 10, dataRows, 2).setNumberFormat('0.00');            // J:K
+  sheet.getRange(2, 8, dataRows, 1).setNumberFormat('#,##0');            // H
+  sheet.getRange(2, 15, dataRows, 1).setNumberFormat('#,##0');           // O
+  sheet.getRange(2, 17, dataRows, 1).setNumberFormat('#,##0');           // Q
+
+  // 寄せ方
+  sheet.getRange(2, 1, dataRows, 1).setHorizontalAlignment('center');    // A
+  sheet.getRange(2, 2, dataRows, 1).setHorizontalAlignment('center');    // B
+  sheet.getRange(2, 9, dataRows, 1).setHorizontalAlignment('center');    // I
+  sheet.getRange(2, 18, dataRows, 1).setHorizontalAlignment('center');   // R
+  sheet.getRange(2, 19, dataRows, 1).setHorizontalAlignment('center');   // S
+  sheet.getRange(2, 3, dataRows, 2).setHorizontalAlignment('right');     // C:D
+  sheet.getRange(2, 8, dataRows, 1).setHorizontalAlignment('right');     // H
+  sheet.getRange(2, 10, dataRows, 2).setHorizontalAlignment('right');    // J:K
+  sheet.getRange(2, 15, dataRows, 1).setHorizontalAlignment('right');    // O
+  sheet.getRange(2, 17, dataRows, 1).setHorizontalAlignment('right');    // Q
+  sheet.getRange(2, 5, dataRows, 1).setHorizontalAlignment('left');      // E
+  sheet.getRange(2, 6, dataRows, 1).setHorizontalAlignment('left');      // F
+  sheet.getRange(2, 7, dataRows, 1).setHorizontalAlignment('right');     // G
+  sheet.getRange(2, 12, dataRows, 2).setHorizontalAlignment('left');     // L:M
+  sheet.getRange(2, 14, dataRows, 1).setHorizontalAlignment('right');    // N
+  sheet.getRange(2, 16, dataRows, 1).setHorizontalAlignment('center');   // P
+
+  // 折り返しは住所列・業務目的列のみ
+  sheet.getRange(2, 5, dataRows, 1).setWrap(true);                       // E
+  sheet.getRange(2, 12, dataRows, 1).setWrap(true);                      // L
+  sheet.getRange(2, 16, dataRows, 1).setWrap(true);                      // P
 
   const colWidths = [
-     50,  // A : ID
-    150,  // B : 乗車日時
-     80,  // C : 乗車地(緯度)
-     80,  // D : 乗車地(経度)
-    200,  // E : 乗車地(住所)
-    250,  // F : 乗車メーター写真URL
-    120,  // G : OCR生データ(乗車)
-    120,  // H : 開始メーター値
-    150,  // I : 降車日時
-     80,  // J : 降車地(緯度)
-     80,  // K : 降車地(経度)
-    200,  // L : 降車地(住所)
-    250,  // M : 降車メーター写真URL
-    120,  // N : OCR生データ(降車)
-    120,  // O : 終了メーター値
-    200,  // P : 業務目的
-     90,  // Q : 走行距離(km)
-     80,  // R : ステータス
-    170   // S : 作成日時
+     46,  // A : ID
+    136,  // B : 乗車日時
+     60,  // C : 乗車緯度
+     60,  // D : 乗車経度
+    200,  // E : 乗車住所
+    110,  // F : 乗車時写真
+     70,  // G : 乗車OCR
+     70,  // H : 開始値
+    136,  // I : 降車日時
+     60,  // J : 降車緯度
+     60,  // K : 降車経度
+    200,  // L : 降車住所
+    110,  // M : 降車時写真
+     70,  // N : 降車OCR
+     70,  // O : 終了値
+     90,  // P : 業務目的
+     72,  // Q : 走行距離(km)
+     72,  // R : ステータス
+    180   // S : 作成日時
   ];
+
+  const rules = [];
+  const statusRange = sheet.getRange(2, 18, dataRows, 1);
+  const startOcrRange = sheet.getRange(2, 7, dataRows, 1);
+  const endOcrRange = sheet.getRange(2, 14, dataRows, 1);
+  const distanceRange = sheet.getRange(2, 17, dataRows, 1);
+
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('open')
+      .setBackground('#fff4cc')
+      .setFontColor('#8a5a00')
+      .setRanges([statusRange])
+      .build()
+  );
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('closed')
+      .setBackground('#d7f5e6')
+      .setFontColor('#0d6a3b')
+      .setRanges([statusRange])
+      .build()
+  );
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND($F2<>"",$H2="",ISTEXT($G2),$G2<>"")')
+      .setBackground('#fde4ea')
+      .setFontColor('#a61b39')
+      .setRanges([startOcrRange])
+      .build()
+  );
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND($M2<>"",$O2="",ISTEXT($N2),$N2<>"")')
+      .setBackground('#fde4ea')
+      .setFontColor('#a61b39')
+      .setRanges([endOcrRange])
+      .build()
+  );
+  rules.push(
+    SpreadsheetApp.newConditionalFormatRule()
+      .whenNumberGreaterThan(500)
+      .setBackground('#fff1d6')
+      .setFontColor('#8a5200')
+      .setRanges([distanceRange])
+      .build()
+  );
+  sheet.setConditionalFormatRules(rules);
 
   // 列幅・パディングを Sheets API で一括設定（1回のAPIコールに削減）
   try {
@@ -815,3 +1256,115 @@ function applyJournalFormat() {
     );
   }
 }
+
+// ============================================================
+// 月次アーカイブパック作成
+// 指定月のデータ・PDF・写真を Drive にまとめる
+// ============================================================
+
+function createMonthlyPack(year, month) {
+  const ss      = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet   = ss.getSheetByName(JOURNAL_SHEET);
+  const config  = ss.getSheetByName(CONFIG_SHEET);
+  const allData = sheet.getDataRange().getValues();
+
+  if (!year || !month) {
+    SpreadsheetApp.getUi().alert('year と month を引数で指定してください。\n例: createMonthlyPack(2026, 3)');
+    return;
+  }
+  year  = Number(year);
+  month = Number(month);
+
+  const label = Utilities.formatString('%04d-%02d', year, month);
+
+  // 対象行を抽出（乗車日時ベース）
+  const headers  = allData[0];
+  const dataRows = allData.slice(1).filter(row => {
+    const d = new Date(row[1]); // B: 乗車日時
+    return !isNaN(d) && d.getFullYear() === year && (d.getMonth() + 1) === month;
+  });
+
+  if (dataRows.length === 0) {
+    Logger.log('[createMonthlyPack] ' + label + ' のデータが見つかりませんでした。');
+    try { SpreadsheetApp.getUi().alert(label + ' のデータが見つかりませんでした。'); } catch(e) {}
+    return;
+  }
+
+  // アーカイブ用ルートフォルダを取得・作成
+  const folderId  = config.getRange('B5').getValue();
+  const rootFolder = DriveApp.getFolderById(folderId);
+  const archiveName = 'アーカイブ';
+  const archiveIter = rootFolder.getFoldersByName(archiveName);
+  const archiveRoot = archiveIter.hasNext() ? archiveIter.next() : rootFolder.createFolder(archiveName);
+
+  // 月フォルダを作成（既存があれば上書き用に削除して再作成）
+  const monthIter = archiveRoot.getFoldersByName(label);
+  const monthFolder = monthIter.hasNext() ? monthIter.next() : archiveRoot.createFolder(label);
+
+  // ① スプレッドシートを作成してデータをコピー
+  const newSs   = SpreadsheetApp.create(label + '_運転データ');
+  const newSheet = newSs.getActiveSheet();
+  newSheet.setName('運転日誌');
+  newSheet.appendRow(headers);
+  dataRows.forEach(row => newSheet.appendRow(row));
+  newSheet.getRange(1, 1, 1, headers.length)
+    .setBackground('#4d7aa2').setFontColor('#ffffff').setFontWeight('bold');
+  newSheet.setFrozenRows(1);
+
+  // Driveに移動
+  const newSsFile = DriveApp.getFileById(newSs.getId());
+  monthFolder.addFile(newSsFile);
+  DriveApp.getRootFolder().removeFile(newSsFile);
+
+  // ② 写真を写真フォルダにコピー
+  const photoFolder = monthFolder.createFolder('写真');
+  const copiedCount = { ok: 0, err: 0 };
+
+  dataRows.forEach(row => {
+    [row[5], row[12]].forEach(url => { // F: 乗車写真, M: 降車写真
+      if (!url) return;
+      const match = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+      if (!match) return;
+      try {
+        const file = DriveApp.getFileById(match[1]);
+        file.makeCopy(file.getName(), photoFolder);
+        copiedCount.ok++;
+      } catch(e) {
+        copiedCount.err++;
+      }
+    });
+  });
+
+  // ③ 月次PDFを生成してパックフォルダに移動
+  let pdfUrl = '';
+  try {
+    const pdfResult = JSON.parse(generateMonthlyPDF_(year, month).getContent());
+    if (pdfResult.success) {
+      const pdfFile = DriveApp.getFileById(
+        DriveApp.getFilesByName(label + '_運転日報.pdf').hasNext()
+          ? DriveApp.getFilesByName(label + '_運転日報.pdf').next().getId()
+          : ''
+      );
+      // PDFをパックフォルダにコピー（月報PDFフォルダにも残る）
+      pdfFile.makeCopy(pdfFile.getName(), monthFolder);
+      pdfUrl = pdfResult.pdfUrl;
+    }
+  } catch(e) {
+    // PDF生成失敗は警告のみ
+  }
+
+  const folderUrl = monthFolder.getUrl();
+
+  const msg =
+    '✅ ' + label + ' アーカイブパック作成完了！\n\n' +
+    '・データ行数: ' + dataRows.length + '件\n' +
+    '・写真コピー: ' + copiedCount.ok + '枚' + (copiedCount.err > 0 ? '（' + copiedCount.err + '件エラー）' : '') + '\n' +
+    '・PDF: ' + (pdfUrl ? '生成済み' : '生成スキップ') + '\n\n' +
+    'フォルダ: ' + folderUrl;
+  Logger.log('[createMonthlyPack] ' + msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch(e) {}
+}
+
+// 3月用ショートカット（引数不要で実行できる）
+function createPackForMarch2026() { createMonthlyPack(2026, 3); }
+

@@ -1,6 +1,6 @@
 # Smart Car README
 
-最終更新: 2026-03-08
+最終更新: 2026-03-10
 
 ## 概要
 
@@ -44,7 +44,7 @@ Smart Car は、iPhone から乗車/降車を記録し、Google スプレッド�
 
 ### 出力タイミング
 
-- 自動作成はこれまでどおり毎月1日に前月分を作る
+- 自動作成はこれまでどおり毎月1日に前月分を作る（`monthlyAutoReport()`）
 - 手動再出力は `generateMonthlyPDF_(year, month)` を直接実行する
 
 ## 運転日誌の列構成
@@ -143,10 +143,22 @@ Smart Car は、iPhone から乗車/降車を記録し、Google スプレッド�
   - ヘッダー名だけ更新
   - データ本体や列順は変更しない
 - `applyJournalFormat()`
-  - 列幅、色、寄せ方、表示形式、条件付き書式を再適用
+  - 列幅、色、寄せ方、表示形式、条件付き書式を既存全行に再適用
+- `formatNewRow_(sheet, rowNum)` ★2026-03-10追加
+  - 乗車記録 (`startTrip_`) 時に自動で新規行に書式を適用
+  - 新規行のセル書式・配置・数値フォーマット・パディングを設定
 - `generateMonthlyPDF_(year, month)`
   - 前月または指定月の月報PDFを作成
   - `closed` / `降車日時ベース` / `要確認分離` で集計
+- `createMonthlyPack(year, month)` ★2026-03-10追加
+  - 月ごとのデータ一式をDriveにアーカイブ
+  - 保存先: `SmartCar_写真/アーカイブ/YYYY-MM/`
+  - 内容: ①データ（Googleスプレッドシート）②写真コピー ③月次PDF
+  - 元データは削除しない（アーカイブのみ）
+- `createPackForMarch2026()` ★テスト用ショートカット
+  - `createMonthlyPack(2026, 3)` の手動実行用
+- `monthlyAutoReport()`
+  - 毎月1日9:00にトリガー実行 → `createMonthlyPack()` を呼び出す
 - `migrateColumnOrder()`
   - 古い列構成から新しい列構成へ移行するための関数
   - 通常運用では何度も実行しない
@@ -183,7 +195,25 @@ Smart Car は、iPhone から乗車/降車を記録し、Google スプレッド�
 - `index.html` の画面を変えたとき
   - Webアプリの再デプロイが必要
 
+## 月次アーカイブパック
+
+毎月1日に前月分のデータをまとめてDriveに保存する。
+
+- 保存先: `SmartCar_写真/アーカイブ/YYYY-MM/`
+- フォルダ構成:
+  ```
+  アーカイブ/
+  └── 2026-03/
+      ├── 2026-03_運転日誌.gsheet  ← 月間データ（Googleスプレッドシート）
+      ├── 2026-03_運転日報.pdf     ← 月次PDFレポート
+      └── 写真/
+          ├── meter_xxxx.jpg       ← 乗車・降車メーター写真のコピー
+          └── ...
+  ```
+- **元データは削除しない**（原本はスプレッドシートとDriveにそのまま残る）
+- 手動テスト: GASエディタで `createPackForMarch2026()` を実行
+
 ## 現在のバージョン
 
 - `index.html`: `_VERSION = "v1.0"`（2026-03-10 正式リリース）
-- `Code.gs`: `_VERSION = "v0.3"`
+- `Code.gs`: `_VERSION = "v0.3"`（2026-03-10更新・要再デプロイ）
