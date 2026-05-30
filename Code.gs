@@ -47,8 +47,7 @@ const JOURNAL_SHEET = '運転日誌';
 const LOG_SHEET     = '編集ログ';
 const CONFIG_SHEET  = '設定';
 const FOLDER_NAME   = 'SmartCar_写真';
-const _VERSION      = 'v0.5';
-const REPORT_TRIGGER_SCHEDULE = 'monthly';
+const _VERSION      = 'v0.6';
 
 // ============================================================
 // エントリーポイント
@@ -90,10 +89,12 @@ function doPost(e) {
     }
 
     switch (data.type) {
-      case 'start':  return startTrip_(data);
-      case 'end':    return endTrip_(data);
-      case 'report': return generateMonthlyPDF_(data.year, data.month);
-      case 'edit':   return editRecord_(data);
+      case 'start':      return startTrip_(data);
+      case 'end':        return endTrip_(data);
+      case 'report':     return generateMonthlyPDF_(data.year, data.month);
+      case 'edit':       return editRecord_(data);
+      case 'listMonths': return listArchivableMonths_();
+      case 'createPack': return jsonResponse_(createMonthlyPackCore_(Number(data.year), Number(data.month)));
       default:
         return jsonResponse_({ success: false, error: '不明なタイプ: ' + data.type });
     }
@@ -144,7 +145,19 @@ function startTrip_(data) {
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(JOURNAL_SHEET);
 
+  // 重複防止：直近1分以内に同じ住所の乗車記録があれば弾く
   const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    const lastTime = sheet.getRange(lastRow, 2).getValue();  // B: 乗車日時
+    const lastAddr = sheet.getRange(lastRow, 5).getValue();  // E: 乗車住所
+    if (lastTime instanceof Date) {
+      const diffSec = (new Date(data.datetime) - lastTime) / 1000;
+      if (diffSec >= 0 && diffSec < 60 && lastAddr === (data.address || '')) {
+        return jsonResponse_({ success: true, tripId: Number(sheet.getRange(lastRow, 1).getValue()), duplicate: true });
+      }
+    }
+  }
+
   const id = lastRow > 1 ? Number(sheet.getRange(lastRow, 1).getValue()) + 1 : 1;
 
   const photoUrl = data.photo
@@ -202,6 +215,11 @@ function endTrip_(data) {
 
   if (targetRow === -1) {
     return jsonResponse_({ success: false, error: '指定されたトリップが見つかりません (ID: ' + data.tripId + ')' });
+  }
+
+  // 重複防止：既に closed なら処理済みとみなす
+  if (allData[targetRow - 1][17] === 'closed') {
+    return jsonResponse_({ success: true, duplicate: true });
   }
 
   const photoUrl = data.photo
@@ -779,53 +797,6 @@ function trashExistingFilesByName_(folder, fileName) {
 }
 
 // ============================================================
-// 月次自動トリガー（毎月1日 9:00）
-// ============================================================
-
-function monthlyAutoReport() {
-  const now   = new Date();
-  let   month = now.getMonth();
-  let   year  = now.getFullYear();
-  if (month === 0) { month = 12; year--; }
-  createMonthlyPack(year, month);  // PDF＋データ＋写真を一括アーカイブ
-}
-
-function ensureReportTrigger_() {
-  const triggers = ScriptApp.getProjectTriggers();
-
-  triggers.forEach(trigger => {
-    if (trigger.getHandlerFunction() === 'monthlyAutoReport') {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
-
-  const builder = ScriptApp.newTrigger('monthlyAutoReport').timeBased().atHour(9);
-  if (REPORT_TRIGGER_SCHEDULE === 'daily') {
-    builder.everyDays(1).create();
-    return;
-  }
-
-  builder.onMonthDay(1).create();
-}
-
-function refreshReportTrigger() {
-  ensureReportTrigger_();
-  SpreadsheetApp.getUi().alert(
-    '月報トリガーを更新しました。現在の設定: ' +
-    (REPORT_TRIGGER_SCHEDULE === 'daily' ? '毎日 9:00' : '毎月1日 9:00')
-  );
-}
-
-function runMonthlyReportForCurrentMonth() {
-  const now = new Date();
-  generateMonthlyPDF_(now.getFullYear(), now.getMonth() + 1);
-}
-
-function runMonthlyReportForMarch2026() {
-  generateMonthlyPDF_(2026, 3);
-}
-
-// ============================================================
 // 初期セットアップ（最初に1回だけ実行）
 // ============================================================
 
@@ -874,7 +845,6 @@ function setupSheets() {
   configSheet.getRange('B5').setValue(folder.getId());
 
   const existingTriggers = ScriptApp.getProjectTriggers();
-  ensureReportTrigger_();
 
   const alreadyHasOcr = existingTriggers.some(t => t.getHandlerFunction() === 'processOcrBatch');
   if (!alreadyHasOcr) {
@@ -1262,109 +1232,182 @@ function applyJournalFormat() {
 // 指定月のデータ・PDF・写真を Drive にまとめる
 // ============================================================
 
-function createMonthlyPack(year, month) {
+function createMonthlyPackCore_(year, month) {
+  if (!year || !month) {
+    return { success: false, error: 'year と month を指定してください' };
+  }
+  year  = Number(year);
+  month = Number(month);
+  const label = Utilities.formatString('%04d-%02d', year, month);
+
   const ss      = SpreadsheetApp.getActiveSpreadsheet();
   const sheet   = ss.getSheetByName(JOURNAL_SHEET);
   const config  = ss.getSheetByName(CONFIG_SHEET);
   const allData = sheet.getDataRange().getValues();
 
-  if (!year || !month) {
-    SpreadsheetApp.getUi().alert('year と month を引数で指定してください。\n例: createMonthlyPack(2026, 3)');
-    return;
-  }
-  year  = Number(year);
-  month = Number(month);
-
-  const label = Utilities.formatString('%04d-%02d', year, month);
-
-  // 対象行を抽出（乗車日時ベース）
   const headers  = allData[0];
   const dataRows = allData.slice(1).filter(row => {
-    const d = new Date(row[1]); // B: 乗車日時
+    const d = new Date(row[1]);
     return !isNaN(d) && d.getFullYear() === year && (d.getMonth() + 1) === month;
   });
 
   if (dataRows.length === 0) {
-    Logger.log('[createMonthlyPack] ' + label + ' のデータが見つかりませんでした。');
-    try { SpreadsheetApp.getUi().alert(label + ' のデータが見つかりませんでした。'); } catch(e) {}
-    return;
+    return { success: false, error: label + ' のデータが見つかりませんでした' };
   }
 
-  // アーカイブ用ルートフォルダを取得・作成
   const folderId  = config.getRange('B5').getValue();
   const rootFolder = DriveApp.getFolderById(folderId);
-  const archiveName = 'アーカイブ';
-  const archiveIter = rootFolder.getFoldersByName(archiveName);
-  const archiveRoot = archiveIter.hasNext() ? archiveIter.next() : rootFolder.createFolder(archiveName);
+  const archiveIter = rootFolder.getFoldersByName('アーカイブ');
+  const archiveRoot = archiveIter.hasNext() ? archiveIter.next() : rootFolder.createFolder('アーカイブ');
 
-  // 月フォルダを作成（既存があれば上書き用に削除して再作成）
-  const monthIter = archiveRoot.getFoldersByName(label);
-  const monthFolder = monthIter.hasNext() ? monthIter.next() : archiveRoot.createFolder(label);
-
-  // ① スプレッドシートを作成してデータをコピー
-  const newSs   = SpreadsheetApp.create(label + '_運転データ');
-  const newSheet = newSs.getActiveSheet();
-  newSheet.setName('運転日誌');
-  newSheet.appendRow(headers);
-  dataRows.forEach(row => newSheet.appendRow(row));
-  newSheet.getRange(1, 1, 1, headers.length)
-    .setBackground('#4d7aa2').setFontColor('#ffffff').setFontWeight('bold');
-  newSheet.setFrozenRows(1);
-
-  // Driveに移動
-  const newSsFile = DriveApp.getFileById(newSs.getId());
-  monthFolder.addFile(newSsFile);
-  DriveApp.getRootFolder().removeFile(newSsFile);
-
-  // ② 写真を写真フォルダにコピー
-  const photoFolder = monthFolder.createFolder('写真');
-  const copiedCount = { ok: 0, err: 0 };
-
-  dataRows.forEach(row => {
-    [row[5], row[12]].forEach(url => { // F: 乗車写真, M: 降車写真
-      if (!url) return;
-      const match = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
-      if (!match) return;
-      try {
-        const file = DriveApp.getFileById(match[1]);
-        file.makeCopy(file.getName(), photoFolder);
-        copiedCount.ok++;
-      } catch(e) {
-        copiedCount.err++;
-      }
-    });
-  });
-
-  // ③ 月次PDFを生成してパックフォルダに移動
-  let pdfUrl = '';
-  try {
-    const pdfResult = JSON.parse(generateMonthlyPDF_(year, month).getContent());
-    if (pdfResult.success) {
-      const pdfFile = DriveApp.getFileById(
-        DriveApp.getFilesByName(label + '_運転日報.pdf').hasNext()
-          ? DriveApp.getFilesByName(label + '_運転日報.pdf').next().getId()
-          : ''
-      );
-      // PDFをパックフォルダにコピー（月報PDFフォルダにも残る）
-      pdfFile.makeCopy(pdfFile.getName(), monthFolder);
-      pdfUrl = pdfResult.pdfUrl;
-    }
-  } catch(e) {
-    // PDF生成失敗は警告のみ
+  // 既存の月フォルダがあれば一時退避（処理成功後にゴミ箱へ、失敗時は手動復旧用に残す）
+  const oldFolders = [];
+  const existingIter = archiveRoot.getFoldersByName(label);
+  const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss');
+  while (existingIter.hasNext()) {
+    const old = existingIter.next();
+    old.setName(label + '_old_' + stamp);
+    oldFolders.push(old);
   }
 
-  const folderUrl = monthFolder.getUrl();
+  const monthFolder = archiveRoot.createFolder(label);
 
-  const msg =
-    '✅ ' + label + ' アーカイブパック作成完了！\n\n' +
-    '・データ行数: ' + dataRows.length + '件\n' +
-    '・写真コピー: ' + copiedCount.ok + '枚' + (copiedCount.err > 0 ? '（' + copiedCount.err + '件エラー）' : '') + '\n' +
-    '・PDF: ' + (pdfUrl ? '生成済み' : '生成スキップ') + '\n\n' +
-    'フォルダ: ' + folderUrl;
-  Logger.log('[createMonthlyPack] ' + msg);
-  try { SpreadsheetApp.getUi().alert(msg); } catch(e) {}
+  try {
+    // ① スプレッドシートを作成してデータをコピー
+    const newSs   = SpreadsheetApp.create(label + '_運転データ');
+    const newSheet = newSs.getActiveSheet();
+    newSheet.setName('運転日誌');
+    newSheet.appendRow(headers);
+    dataRows.forEach(row => newSheet.appendRow(row));
+    newSheet.getRange(1, 1, 1, headers.length)
+      .setBackground('#4d7aa2').setFontColor('#ffffff').setFontWeight('bold');
+    newSheet.setFrozenRows(1);
+
+    const newSsFile = DriveApp.getFileById(newSs.getId());
+    monthFolder.addFile(newSsFile);
+    DriveApp.getRootFolder().removeFile(newSsFile);
+
+    // ② 写真を写真フォルダにコピー
+    const photoFolder = monthFolder.createFolder('写真');
+    const copiedCount = { ok: 0, err: 0 };
+
+    dataRows.forEach(row => {
+      [row[5], row[12]].forEach(url => {
+        if (!url) return;
+        const match = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
+        if (!match) return;
+        try {
+          const file = DriveApp.getFileById(match[1]);
+          file.makeCopy(file.getName(), photoFolder);
+          copiedCount.ok++;
+        } catch(e) {
+          copiedCount.err++;
+        }
+      });
+    });
+
+    // ③ 月次PDFを生成してパックフォルダに移動
+    let pdfUrl = '';
+    try {
+      const pdfResult = JSON.parse(generateMonthlyPDF_(year, month).getContent());
+      if (pdfResult.success) {
+        const pdfIter = DriveApp.getFilesByName(label + '_運転日報.pdf');
+        if (pdfIter.hasNext()) {
+          const pdfFile = pdfIter.next();
+          pdfFile.makeCopy(pdfFile.getName(), monthFolder);
+          pdfUrl = pdfResult.pdfUrl;
+        }
+      }
+    } catch(e) {
+      // PDF生成失敗は警告のみ
+    }
+
+    // 成功 → 退避した旧フォルダをゴミ箱へ
+    oldFolders.forEach(f => { try { f.setTrashed(true); } catch(e) {} });
+
+    const folderUrl = monthFolder.getUrl();
+    const message =
+      '✅ ' + label + ' アーカイブ完了\n' +
+      '・データ ' + dataRows.length + '件\n' +
+      '・写真 ' + copiedCount.ok + '枚' + (copiedCount.err > 0 ? '（' + copiedCount.err + '件エラー）' : '') + '\n' +
+      '・PDF ' + (pdfUrl ? '生成済み' : '生成スキップ');
+    Logger.log('[createMonthlyPack] ' + message + ' / ' + folderUrl);
+
+    return {
+      success: true,
+      label: label,
+      message: message,
+      folderUrl: folderUrl,
+      pdfUrl: pdfUrl,
+      dataCount: dataRows.length,
+      photoOk: copiedCount.ok,
+      photoErr: copiedCount.err
+    };
+  } catch (err) {
+    // 失敗 → 新フォルダを削除（旧フォルダは _old_ で残る）
+    try { monthFolder.setTrashed(true); } catch(e) {}
+    throw err;
+  }
 }
 
-// 3月用ショートカット（引数不要で実行できる）
-function createPackForMarch2026() { createMonthlyPack(2026, 3); }
+// スクリプトエディタから手動実行する場合のラッパー
+function createMonthlyPack(year, month) {
+  const result = createMonthlyPackCore_(year, month);
+  const text = result.success ? result.message + '\n\nフォルダ: ' + result.folderUrl : result.error;
+  try { SpreadsheetApp.getUi().alert(text); } catch(e) {}
+  return result;
+}
+
+// 運転日誌からアーカイブ可能な年月を一覧化（アーカイブ済み状態も付与）
+function listArchivableMonths_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(JOURNAL_SHEET);
+  const config = ss.getSheetByName(CONFIG_SHEET);
+  const data = sheet.getDataRange().getValues();
+
+  const monthMap = {};
+  for (let i = 1; i < data.length; i++) {
+    const d = new Date(data[i][1]);
+    if (isNaN(d)) continue;
+    const key = Utilities.formatString('%04d-%02d', d.getFullYear(), d.getMonth() + 1);
+    if (!monthMap[key]) {
+      monthMap[key] = { year: d.getFullYear(), month: d.getMonth() + 1, count: 0 };
+    }
+    monthMap[key].count++;
+  }
+
+  const archived = {};
+  try {
+    const folderId = config.getRange('B5').getValue();
+    const rootFolder = DriveApp.getFolderById(folderId);
+    const archiveIter = rootFolder.getFoldersByName('アーカイブ');
+    if (archiveIter.hasNext()) {
+      const folders = archiveIter.next().getFolders();
+      while (folders.hasNext()) {
+        const f = folders.next();
+        const name = f.getName();
+        if (/^\d{4}-\d{2}$/.test(name)) {
+          archived[name] = {
+            archivedAt: f.getLastUpdated().toISOString(),
+            folderUrl: f.getUrl()
+          };
+        }
+      }
+    }
+  } catch(e) {
+    // アーカイブフォルダ取得失敗は無視（未アーカイブ扱い）
+  }
+
+  const months = Object.keys(monthMap).sort().reverse().map(key => ({
+    label: key,
+    year: monthMap[key].year,
+    month: monthMap[key].month,
+    tripCount: monthMap[key].count,
+    archived: !!archived[key],
+    archivedAt: archived[key] ? archived[key].archivedAt : null,
+    folderUrl: archived[key] ? archived[key].folderUrl : null
+  }));
+
+  return jsonResponse_({ success: true, months: months });
+}
 

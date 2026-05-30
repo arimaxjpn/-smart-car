@@ -173,6 +173,35 @@
       cursor: pointer; padding: 0.5rem; min-width: 4.5rem;
     }
 
+    /* ---- 管理画面 ---- */
+    .icon-btn {
+      background: transparent; border: none; color: var(--text2);
+      cursor: pointer; padding: 0.375rem; font-size: 1.125rem;
+      line-height: 1; -webkit-appearance: none;
+    }
+    .icon-btn:active { opacity: 0.6; }
+    #screen-admin .content { padding: 1.25rem; }
+    .month-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 0.75rem; padding: 0.875rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .month-row:last-child { border-bottom: none; }
+    .month-meta { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; flex: 1; }
+    .month-label { font-size: 1.125rem; font-weight: 700; }
+    .month-sub { font-size: 0.75rem; color: var(--text2); }
+    .month-sub.archived { color: var(--green); }
+    .month-btn {
+      flex-shrink: 0; border: none; border-radius: 9999px;
+      padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 700;
+      font-family: 'Outfit', 'IBM Plex Sans JP', sans-serif;
+      cursor: pointer; -webkit-appearance: none;
+    }
+    .month-btn-primary { background: var(--accent); color: #fff; }
+    .month-btn-secondary { background: var(--bg3); color: var(--text2); border: 1px solid var(--border2); }
+    .month-btn:disabled { opacity: 0.4; cursor: default; }
+    .empty-msg { color: var(--text2); font-size: 0.875rem; padding: 2rem 0; text-align: center; }
+
     /* ---- トースト ---- */
     .toast {
       position: fixed; bottom: 2.25rem; left: 50%;
@@ -212,6 +241,7 @@
   <div class="status-bar">
     <div class="dot dot-green"></div>
     <div class="status-label">乗車前</div>
+    <button class="icon-btn" onclick="openAdmin()" style="margin-left:auto;" aria-label="管理メニュー">⚙</button>
   </div>
   <div class="content">
     <h1>🚗 乗車記録 <span id="app-version" style="font-size:0.75rem;color:var(--text2);font-weight:400;"></span></h1>
@@ -282,6 +312,21 @@
 </div>
 
 
+<!-- 管理画面 -->
+<div id="screen-admin" class="screen">
+  <div class="status-bar">
+    <button class="icon-btn" onclick="closeAdmin()" style="font-size:1.25rem;" aria-label="戻る">←</button>
+    <div class="status-label">管理メニュー</div>
+  </div>
+  <div class="content">
+    <h1 style="font-size:1.5rem;margin-bottom:0.25rem;">月次まとめ</h1>
+    <p class="sub">対象月をタップしてアーカイブを作成します</p>
+    <div class="card" id="month-list-card">
+      <div id="month-list"><div class="empty-msg">読み込み中...</div></div>
+    </div>
+  </div>
+</div>
+
 <!-- カメラモーダル -->
 <div id="cam-modal">
   <div id="cam-video-wrap">
@@ -301,14 +346,33 @@
 <div class="toast" id="toast"></div>
 
 <script>
-const _VERSION  = 'v1.3';
+const _VERSION  = 'v1.5';
 const GAS_URL   = 'https://script.google.com/macros/s/AKfycbzSPja787LxEq4DyC74h62l0Zyac-wi8ZVQEdJIUnF6qTwYUh_ohODj0CkxbulH-L9h/exec';
 const TOKEN_KEY = 'smartcar_token';
+const FETCH_TIMEOUT = 30000;
+const PHOTO_MAX_W   = 640;
+const PHOTO_QUALITY = 0.5;
 
 let currentTrip      = null;
 let photoBase64Start = '';
 let photoBase64End   = '';
 let locationPromise  = null;
+let isLocationBusy   = false;
+
+// ---- タイムアウト付き fetch ----
+async function fetchWithTimeout(url, opts = {}, timeout = FETCH_TIMEOUT) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const res = await fetch(url, { ...opts, signal: ctrl.signal });
+    return res;
+  } catch(e) {
+    if (e.name === 'AbortError') throw new Error('通信タイムアウト（30秒）');
+    throw e;
+  } finally {
+    clearTimeout(id);
+  }
+}
 
 // ---- 停車検知・アラーム ----
 let audioCtx      = null;
@@ -379,7 +443,7 @@ function playArrivalAlarm() {
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+      gain.gain.setValueAtTime(1.0, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
       osc.start(audioCtx.currentTime);
       osc.stop(audioCtx.currentTime + 0.4);
@@ -447,8 +511,7 @@ function capturePhoto() {
   const cy = Math.max(0, Math.round((gY - offY) / scale));
   const cw = Math.min(Math.round(gW / scale), vW - cx);
   const ch = Math.min(Math.round(gH / scale), vH - cy);
-  const MAX_W = 1024;
-  const s = cw > MAX_W ? MAX_W / cw : 1;
+  const s = cw > PHOTO_MAX_W ? PHOTO_MAX_W / cw : 1;
   const canvas = document.createElement('canvas');
   canvas.width  = Math.round(cw * s);
   canvas.height = Math.round(ch * s);
@@ -503,7 +566,7 @@ async function init() {
   document.getElementById('screen-loading').style.display = 'flex';
   if (!getToken()) { show('setup'); return; }
   try {
-    const res  = await fetch(GAS_URL + '?action=status&token=' + getToken());
+    const res  = await fetchWithTimeout(GAS_URL + '?action=status&token=' + getToken());
     const json = await res.json();
     if (!json.success) throw new Error(json.error);
     if (json.hasOpenTrip) {
@@ -583,8 +646,7 @@ function handlePhoto(input, previewId) {
   reader.onload = e => {
     const img = new Image();
     img.onload = () => {
-      const MAX_W = 1024;
-      const scale = img.width > MAX_W ? MAX_W / img.width : 1;
+      const scale = img.width > PHOTO_MAX_W ? PHOTO_MAX_W / img.width : 1;
       const canvas = document.createElement('canvas');
       canvas.width  = Math.round(img.width  * scale);
       canvas.height = Math.round(img.height * scale);
@@ -597,7 +659,7 @@ function handlePhoto(input, previewId) {
 }
 
 function processCanvas(canvas, previewId) {
-  const b64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+  const b64 = canvas.toDataURL('image/jpeg', PHOTO_QUALITY).split(',')[1];
   if (previewId === 'photo-preview-start') photoBase64Start = b64;
   else photoBase64End = b64;
   const prev = document.getElementById(previewId);
@@ -620,9 +682,10 @@ function retakePhoto(target) {
 async function getAddress(lat, lon) {
   if (!lat || !lon) return '';
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       'https://nominatim.openstreetmap.org/reverse?lat=' + lat + '&lon=' + lon + '&format=json&accept-language=ja',
-      { headers: { 'Accept-Language': 'ja' } }
+      { headers: { 'Accept-Language': 'ja' } },
+      10000
     );
     const json = await res.json();
     return formatAddress(json.address || {});
@@ -648,12 +711,13 @@ function formatAddress(address) {
 
 async function doSubmitStart(purpose) {
   const loc = await locationPromise;
-  const res = await fetch(GAS_URL, {
+  const submitTime = new Date();
+  const res = await fetchWithTimeout(GAS_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({
       token: getToken(), type: 'start',
-      datetime: new Date().toISOString(),
+      datetime: submitTime.toISOString(),
       lat: loc.lat, lon: loc.lon, address: loc.address,
       purpose: purpose,
       photo: photoBase64Start
@@ -662,7 +726,15 @@ async function doSubmitStart(purpose) {
   const json = await res.json();
   if (!json.success) throw new Error(json.error);
   toast('乗車記録完了');
-  setTimeout(init, 2000);
+  // ローカルで降車画面に遷移（GAS再呼び出し不要）
+  currentTrip = { tripId: json.tripId, startDatetime: submitTime.toISOString(), startAddress: loc.address };
+  photoBase64End = '';
+  document.getElementById('photo-wrap-end').style.display = 'none';
+  document.getElementById('photo-tap-end').style.display = 'flex';
+  buildTripInfo();
+  startLocationAcquisition();
+  show('end');
+  startStopWatch();
 }
 
 // ---- 降車画面 ----
@@ -691,21 +763,25 @@ function updateEndAddressDisplay() {
 function refreshEndLocation() {
   const btn = document.getElementById('btn-refresh-loc');
   if (btn) btn.disabled = true;
+  isLocationBusy = true;
   startLocationAcquisition();
   updateEndAddressDisplay();
-  locationPromise.then(() => { if (btn) btn.disabled = false; });
+  locationPromise.then(() => {
+    isLocationBusy = false;
+    if (btn) btn.disabled = false;
+  });
 }
 
 async function submitEnd() {
   if (!photoBase64End) { toast('写真を撮影してください'); return; }
+  if (isLocationBusy) { toast('位置情報を取得中です。完了後に再度押してください'); return; }
 
   const btn = document.querySelector('#screen-end .btn-red');
-  btn.disabled = true; btn.textContent = '位置情報取得中...';
+  btn.disabled = true; btn.textContent = '送信中...';
 
-  const loc = await locationPromise;
-  btn.textContent = '送信中...';
   try {
-    const res = await fetch(GAS_URL, {
+    const loc = await locationPromise;
+    const res = await fetchWithTimeout(GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({
@@ -720,10 +796,89 @@ async function submitEnd() {
     if (!json.success) throw new Error(json.error);
     stopStopWatch();
     toast('降車記録完了');
-    setTimeout(init, 2000);
+    // ローカルで乗車画面に遷移（GAS再呼び出し不要）
+    currentTrip = null;
+    resetStart();
+    show('start');
   } catch(e) {
     toast('エラー: ' + e.message);
     btn.disabled = false; btn.textContent = '降車記録';
+  }
+}
+
+// ---- 管理画面 ----
+async function openAdmin() {
+  show('admin');
+  document.getElementById('month-list').innerHTML = '<div class="empty-msg">読み込み中...</div>';
+  try {
+    const res = await fetchWithTimeout(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ token: getToken(), type: 'listMonths' })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    renderMonthList(json.months);
+  } catch(e) {
+    document.getElementById('month-list').innerHTML =
+      '<div class="empty-msg">読み込み失敗: ' + e.message + '</div>';
+  }
+}
+
+function closeAdmin() {
+  show('start');
+}
+
+function renderMonthList(months) {
+  const el = document.getElementById('month-list');
+  if (!months || months.length === 0) {
+    el.innerHTML = '<div class="empty-msg">運転記録がまだありません</div>';
+    return;
+  }
+  el.innerHTML = months.map(m => {
+    const archivedAt = m.archivedAt
+      ? new Date(m.archivedAt).toLocaleDateString('ja-JP', { month:'numeric', day:'numeric' })
+      : '';
+    const sub = m.archived
+      ? '<span class="month-sub archived">✅ ' + archivedAt + ' にアーカイブ済</span>'
+      : '<span class="month-sub">' + m.tripCount + '件 / 未アーカイブ</span>';
+    const btnClass = m.archived ? 'month-btn-secondary' : 'month-btn-primary';
+    const btnText  = m.archived ? '上書き' : 'まとめる';
+    return '<div class="month-row">' +
+      '<div class="month-meta">' +
+        '<div class="month-label">' + m.label + '</div>' +
+        sub +
+      '</div>' +
+      '<button class="month-btn ' + btnClass + '" onclick="archiveMonth(' + m.year + ',' + m.month + ',' + m.archived + ',this)">' + btnText + '</button>' +
+    '</div>';
+  }).join('');
+}
+
+async function archiveMonth(year, month, isArchived, btn) {
+  const label = year + '年' + month + '月';
+  const confirmMsg = isArchived
+    ? label + 'はアーカイブ済みです。上書きしますか？'
+    : label + 'のデータをまとめます。よろしいですか？';
+  if (!confirm(confirmMsg)) return;
+
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '処理中...';
+  try {
+    const res = await fetchWithTimeout(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ token: getToken(), type: 'createPack', year: year, month: month })
+    }, 120000);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error);
+    toast('アーカイブ完了');
+    alert(json.message + '\n\nフォルダ: ' + json.folderUrl);
+    openAdmin();
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = origText;
+    toast('エラー: ' + e.message);
   }
 }
 
