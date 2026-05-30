@@ -535,8 +535,8 @@ function generateMonthlyPDF_(year, month) {
   const totalDistance = validRows.reduce((sum, item) => sum + item.distance, 0);
   const totalAmount   = totalDistance * unitPrice;
   const periodLabel = Utilities.formatString('%04d-%02d', year, month);
-  const fileName = periodLabel + '_運転日報.pdf';
-  const docTitle = periodLabel + '_運転日報';
+  const fileName = periodLabel + '_運転月報.pdf';
+  const docTitle = periodLabel + '_運転月報';
   const doc      = DocumentApp.create(docTitle);
   const body     = doc.getBody();
 
@@ -1311,7 +1311,7 @@ function createMonthlyPackCore_(year, month) {
     try {
       const pdfResult = JSON.parse(generateMonthlyPDF_(year, month).getContent());
       if (pdfResult.success) {
-        const pdfIter = DriveApp.getFilesByName(label + '_運転日報.pdf');
+        const pdfIter = DriveApp.getFilesByName(label + '_運転月報.pdf');
         if (pdfIter.hasNext()) {
           const pdfFile = pdfIter.next();
           pdfFile.makeCopy(pdfFile.getName(), monthFolder);
